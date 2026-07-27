@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BPF Resource Thief Detector — সম্পূর্ণ ব্যাখ্যা</title>
+<style>
+:root{
+  --bg:#ffffff;--surface:#f6f8fa;--border:#d0d7de;--text:#1f2328;
+  --muted:#656d76;--accent:#0969da;--green:#1a7f37;--red:#cf222e;
+  --yellow:#9a6700;--purple:#8250df;--code-bg:#f6f8fa;
+  --heading:#0d1117;--tag-bg:#ddf4ff;--tag-color:#0550ae;
+  --warn-bg:#fff8c5;--warn-border:#d4a72c;
+  --alert-bg:#ffebe9;--alert-border:#ff8182;
+  --tip-bg:#dafbe1;--tip-border:#4ac26b;
+  --radius:8px;
+  --font:'Segoe UI',system-ui,sans-serif;
+  --mono:'Cascadia Code','Fira Code','Consolas',monospace;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;
+    --muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;
+    --yellow:#d29922;--purple:#bc8cff;--code-bg:#161b22;
+    --heading:#f0f6fc;--tag-bg:#0d2149;--tag-color:#79c0ff;
+    --warn-bg:#272115;--warn-border:#9e6a03;
+    --alert-bg:#1f0d0d;--alert-border:#da3633;
+    --tip-bg:#0d2116;--tip-border:#238636;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:var(--font);font-size:15px;line-height:1.7;
+}
+
+/* ── Print ── */
+@media print{
+  body{background:#fff;color:#000;font-size:12px}
+  .no-print,.toc-sidebar{display:none!important}
+  .page-break{page-break-before:always}
+  pre,code{background:#f5f5f5!important;color:#000!important;border:1px solid #ccc}
+  a{color:#000;text-decoration:none}
+  svg text{fill:#000!important}
+}
+
+/* ── Layout ── */
+.layout{display:flex;max-width:1300px;margin:0 auto;gap:0}
+.toc-sidebar{
+  width:260px;min-width:260px;
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+  border-right:1px solid var(--border);
+  background:var(--surface);
+  padding:20px 0;
+}
+.toc-sidebar::-webkit-scrollbar{width:4px}
+.toc-sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.toc-title{
+  font-size:11px;font-weight:700;letter-spacing:.8px;
+  color:var(--muted);text-transform:uppercase;
+  padding:0 20px 12px;
+}
+.toc-sidebar a{
+  display:block;padding:5px 20px;font-size:13px;
+  color:var(--muted);text-decoration:none;
+  border-left:2px solid transparent;
+  transition:.15s;
+}
+.toc-sidebar a:hover{color:var(--accent);border-left-color:var(--accent)}
+.toc-sidebar a.h2{font-weight:600;color:var(--text);padding-left:20px}
+.toc-sidebar a.h3{padding-left:32px;font-size:12px}
+.toc-sidebar a.h4{padding-left:44px;font-size:11px;color:var(--muted)}
+
+.content{flex:1;min-width:0;padding:40px 52px}
+@media(max-width:900px){
+  .toc-sidebar{display:none}
+  .content{padding:24px 20px}
+}
+
+/* ── Header ── */
+.doc-header{
+  background:linear-gradient(135deg,#0d1117 0%,#1a2332 50%,#0d1117 100%);
+  color:#e6edf3;padding:60px 52px 48px;
+  border-bottom:1px solid var(--border);
+}
+.doc-header .chip{
+  display:inline-block;padding:3px 10px;border-radius:20px;
+  background:rgba(88,166,255,.15);border:1px solid rgba(88,166,255,.3);
+  color:#58a6ff;font-size:12px;font-weight:500;margin-bottom:16px;
+}
+.doc-header h1{
+  font-size:32px;font-weight:800;line-height:1.2;
+  color:#f0f6fc;margin-bottom:10px;
+}
+.doc-header .subtitle{font-size:16px;color:#8b949e;margin-bottom:24px}
+.meta-pills{display:flex;flex-wrap:wrap;gap:8px}
+.meta-pill{
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);
+  border-radius:20px;padding:4px 12px;font-size:12px;color:#adbac7;
+}
+
+/* ── Typography ── */
+h1,h2,h3,h4{color:var(--heading);line-height:1.3}
+h2{
+  font-size:22px;font-weight:700;margin:48px 0 16px;
+  padding-bottom:8px;border-bottom:2px solid var(--border);
+  display:flex;align-items:center;gap:10px;
+}
+h2 .num{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:6px;
+  background:var(--accent);color:#fff;font-size:13px;font-weight:700;
+  flex-shrink:0;
+}
+h3{font-size:17px;margin:28px 0 10px;color:var(--accent)}
+h4{font-size:15px;margin:20px 0 8px;color:var(--purple)}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 14px 22px}
+li{margin-bottom:6px}
+strong{color:var(--heading);font-weight:600}
+
+/* ── Code ── */
+pre{
+  background:var(--code-bg);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px 18px;
+  overflow-x:auto;margin:14px 0;
+  font-family:var(--mono);font-size:13px;line-height:1.6;
+}
+code{
+  font-family:var(--mono);font-size:12.5px;
+  background:var(--code-bg);border:1px solid var(--border);
+  border-radius:4px;padding:1px 6px;
+}
+pre code{background:none;border:none;padding:0;font-size:inherit}
+
+/* Syntax highlighting */
+.kw{color:#ff7b72}
+.cm{color:#8b949e;font-style:italic}
+.str{color:#a5d6ff}
+.num{color:#79c0ff}
+.fn{color:#d2a8ff}
+.type{color:#ffa657}
+.cmt{color:#8b949e}
+
+/* ── Callout boxes ── */
+.callout{
+  border-radius:var(--radius);padding:14px 18px;
+  margin:16px 0;border-left:4px solid;
+}
+.callout-warn{background:var(--warn-bg);border-color:var(--warn-border)}
+.callout-alert{background:var(--alert-bg);border-color:var(--alert-border)}
+.callout-tip{background:var(--tip-bg);border-color:var(--tip-border)}
+.callout-info{background:var(--tag-bg);border-color:var(--accent)}
+.callout strong{display:block;margin-bottom:6px;font-size:13px}
+
+/* ── Tables ── */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+th{
+  background:var(--surface);padding:10px 14px;text-align:left;
+  font-weight:600;font-size:12px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.4px;
+  border:1px solid var(--border);
+}
+td{padding:10px 14px;border:1px solid var(--border);vertical-align:top}
+tr:nth-child(even) td{background:var(--surface)}
+
+/* ── Tags ── */
+.tag{
+  display:inline-block;padding:2px 8px;border-radius:4px;
+  background:var(--tag-bg);color:var(--tag-color);
+  font-size:11px;font-weight:600;margin:2px;
+}
+.tag-red{background:var(--alert-bg);color:var(--red)}
+.tag-green{background:var(--tip-bg);color:var(--green)}
+.tag-purple{background:#2d1a6e22;color:var(--purple)}
+
+/* ── Diagram containers ── */
+.diagram{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:24px;
+  margin:20px 0;overflow-x:auto;text-align:center;
+}
+.diagram-caption{
+  text-align:center;font-size:12px;color:var(--muted);
+  margin-top:10px;font-style:italic;
+}
+
+/* ── Feature cards ── */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:16px 0}
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:18px;
+  transition:border-color .2s;
+}
+.card:hover{border-color:var(--accent)}
+.card-icon{font-size:24px;margin-bottom:8px}
+.card-title{font-weight:600;font-size:14px;margin-bottom:6px}
+.card-body{font-size:13px;color:var(--muted)}
+
+/* ── Step list ── */
+.steps{counter-reset:step;margin:16px 0}
+.step{
+  display:flex;gap:16px;margin-bottom:20px;
+  align-items:flex-start;
+}
+.step-num{
+  counter-increment:step;
+  content:counter(step);
+  display:flex;align-items:center;justify-content:center;
+  width:32px;height:32px;min-width:32px;
+  border-radius:50%;background:var(--accent);
+  color:#fff;font-weight:700;font-size:14px;
+}
+.step-num::before{content:counter(step)}
+.step-body{flex:1}
+.step-title{font-weight:600;margin-bottom:4px}
+
+/* ── Divider ── */
+hr{border:none;border-top:1px solid var(--border);margin:40px 0}
+
+/* ── Flow arrows in text ── */
+.flow{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  margin:12px 0;font-size:13px;
+}
+.flow-box{
+  padding:5px 12px;border-radius:6px;
+  background:var(--code-bg);border:1px solid var(--border);
+  font-family:var(--mono);font-size:12px;font-weight:600;
+}
+.flow-box.kernel{border-color:var(--red);color:var(--red)}
+.flow-box.user{border-color:var(--accent);color:var(--accent)}
+.flow-box.security{border-color:var(--green);color:var(--green)}
+.flow-arr{color:var(--muted);font-size:18px}
+
+/* ── Bottom nav ── */
+.bottom-nav{
+  text-align:center;padding:40px;
+  border-top:1px solid var(--border);
+  color:var(--muted);font-size:13px;
+}
+</style>
+</head>
+<body>
+
+<!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+<div class="doc-header">
+  <div class="chip">OS Course Project — সম্পূর্ণ ডকুমেন্টেশন</div>
+  <h1>🛡️ BPF-Based Live Resource<br>Thief Detector</h1>
+  <div class="subtitle">A-to-Z Theory, Architecture, Code & Future Scope</div>
+  <div class="meta-pills">
+    <span class="meta-pill">🐧 Linux Kernel 7.0</span>
+    <span class="meta-pill">⚡ eBPF / BCC</span>
+    <span class="meta-pill">🐍 Python 3.14</span>
+    <span class="meta-pill">🌐 Flask + SSE</span>
+    <span class="meta-pill">📊 Chart.js</span>
+    <span class="meta-pill">Ubuntu 26.04</span>
+  </div>
+</div>
+
+<div class="layout">
+
+<!-- ══ TOC ══════════════════════════════════════════════════════════════════ -->
+<nav class="toc-sidebar">
+  <div class="toc-title">বিষয়সূচি</div>
+  <a class="h2" href="#s1">১. প্রজেক্ট কী ও কেন</a>
+  <a class="h2" href="#s2">২. OS Theory</a>
+    <a class="h3" href="#s2-1">Kernel vs User Space</a>
+    <a class="h3" href="#s2-2">System Calls</a>
+    <a class="h3" href="#s2-3">Process Management</a>
+    <a class="h3" href="#s2-4">Virtual Memory</a>
+  <a class="h2" href="#s3">৩. eBPF — গভীরে</a>
+    <a class="h3" href="#s3-1">BPF এর ইতিহাস</a>
+    <a class="h3" href="#s3-2">eBPF VM</a>
+    <a class="h3" href="#s3-3">Verifier</a>
+    <a class="h3" href="#s3-4">JIT Compilation</a>
+    <a class="h3" href="#s3-5">Hook Points</a>
+    <a class="h3" href="#s3-6">eBPF Maps</a>
+  <a class="h2" href="#s4">৪. Security Theory</a>
+    <a class="h3" href="#s4-1">Threat Model</a>
+    <a class="h3" href="#s4-2">Anomaly Detection</a>
+    <a class="h3" href="#s4-3">Data Exfiltration</a>
+  <a class="h2" href="#s5">৫. Architecture</a>
+  <a class="h2" href="#s6">৬. Code Walkthrough</a>
+    <a class="h3" href="#s6-1">ebpf_sensor.c</a>
+    <a class="h3" href="#s6-2">detector.py</a>
+    <a class="h3" href="#s6-3">dashboard.py</a>
+    <a class="h3" href="#s6-4">index.html</a>
+  <a class="h2" href="#s7">৭. Data Flow</a>
+  <a class="h2" href="#s8">৮. Detection Logic</a>
+  <a class="h2" href="#s9">৯. Tech Stack</a>
+  <a class="h2" href="#s10">১০. Future Scope</a>
+  <a class="h2" href="#s11">১১. Q&amp;A</a>
+</nav>
+
+<!-- ══ CONTENT ══════════════════════════════════════════════════════════════ -->
+<div class="content">
+
+<!-- ══ SECTION 1 ══════════════════════════════════════════════════════════ -->
+<h2 id="s1"><span class="num">১</span> প্রজেক্টটি কী এবং কেন বানালাম?</h2>
+
+<p>
+  <strong>BPF-Based Live Resource Thief Detector</strong> হলো একটি Real-time Security Monitoring System
+  যেটি Linux কার্নেলের ভেতরে <strong>eBPF (Extended Berkeley Packet Filter)</strong> প্রযুক্তি ব্যবহার করে
+  সিস্টেমের প্রতিটি process এর আচরণ পর্যবেক্ষণ করে এবং সন্দেহজনক কিছু ঘটলে তাৎক্ষণিক alert দেয়।
+</p>
+
+<div class="callout callout-info">
+  <strong>🎯 এক লাইনে প্রজেক্ট:</strong>
+  "যেকোনো প্রসেস সিস্টেমের সম্পদ চুরি করছে কিনা (resource thief) — সেটা kernel level থেকে ধরে ফেলার একটি live detector।"
+</div>
+
+<h3>কেন এই প্রজেক্ট গুরুত্বপূর্ণ?</h3>
+<div class="card-grid">
+  <div class="card">
+    <div class="card-icon">🏢</div>
+    <div class="card-title">Industry Use</div>
+    <div class="card-body">Netflix (Falco), Google (gVisor), Meta (Katran), Cloudflare — সবাই production এ eBPF ব্যবহার করে।</div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🔍</div>
+    <div class="card-title">Undetectable Monitoring</div>
+    <div class="card-body">Kernel level এ থাকায় কোনো malware নিজেকে লুকাতে পারে না। Task Manager bypass করলেও ধরা পড়বে।</div>
+  </div>
+  <div class="card">
+    <div class="card-icon">⚡</div>
+    <div class="card-title">Zero Overhead</div>
+    <div class="card-body">Traditional monitoring এর তুলনায় eBPF প্রায় শূন্য overhead নিয়ে কাজ করে।</div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🛡️</div>
+    <div class="card-title">OS Concepts Cover</div>
+    <div class="card-body">Syscalls, Kernel/User space, IPC, Process management — OS course এর প্রায় সব টপিক এই একটি প্রজেক্টে।</div>
+  </div>
+</div>
+
+<!-- ══ SECTION 2 ══════════════════════════════════════════════════════════ -->
+<h2 id="s2" class="page-break"><span class="num">২</span> OS Theory — যা জানতে হবে</h2>
+
+<h3 id="s2-1">২.১ Kernel Space vs User Space</h3>
+
+<p>
+  আধুনিক অপারেটিং সিস্টেম মেমোরিকে দুটো ভাগে ভাগ করে — এটা <strong>Hardware Protection Ring</strong> দ্বারা enforce করা হয়।
+</p>
+
+<!-- Diagram 1: Kernel/User Space -->
+<div class="diagram">
+<svg width="680" height="320" viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#8b949e"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#58a6ff"/>
+    </marker>
+    <marker id="arr-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#f85149"/>
+    </marker>
+  </defs>
+
+  <!-- User Space zone -->
+  <rect x="30" y="20" width="620" height="120" rx="10" fill="#0d2149" stroke="#58a6ff" stroke-width="2"/>
+  <text x="48" y="44" fill="#58a6ff" font-size="11" font-weight="700" letter-spacing="1">USER SPACE (Ring 3)</text>
+
+  <!-- Apps -->
+  <rect x="55" y="56" width="100" height="68" rx="6" fill="#0d1f3c" stroke="#30363d" stroke-width="1.5"/>
+  <text x="105" y="84" fill="#79c0ff" font-size="12" font-weight="600" text-anchor="middle">bash</text>
+  <text x="105" y="100" fill="#8b949e" font-size="10" text-anchor="middle">PID 1234</text>
+  <text x="105" y="115" fill="#8b949e" font-size="10" text-anchor="middle">Ring 3</text>
+
+  <rect x="175" y="56" width="100" height="68" rx="6" fill="#0d1f3c" stroke="#30363d" stroke-width="1.5"/>
+  <text x="225" y="84" fill="#79c0ff" font-size="12" font-weight="600" text-anchor="middle">python3</text>
+  <text x="225" y="100" fill="#8b949e" font-size="10" text-anchor="middle">PID 4502</text>
+  <text x="225" y="115" fill="#8b949e" font-size="10" text-anchor="middle">Ring 3</text>
+
+  <rect x="295" y="56" width="110" height="68" rx="6" fill="#1a0d0d" stroke="#f85149" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="350" y="78" fill="#f85149" font-size="12" font-weight="600" text-anchor="middle">malware</text>
+  <text x="350" y="94" fill="#f85149" font-size="10" text-anchor="middle">PID 9999</text>
+  <text x="350" y="112" fill="#8b949e" font-size="10" text-anchor="middle">⚠ Suspicious</text>
+
+  <rect x="425" y="56" width="100" height="68" rx="6" fill="#0d1f3c" stroke="#30363d" stroke-width="1.5"/>
+  <text x="475" y="84" fill="#79c0ff" font-size="12" font-weight="600" text-anchor="middle">nginx</text>
+  <text x="475" y="100" fill="#8b949e" font-size="10" text-anchor="middle">PID 88</text>
+  <text x="475" y="115" fill="#8b949e" font-size="10" text-anchor="middle">Ring 3</text>
+
+  <!-- Syscall barrier -->
+  <rect x="30" y="152" width="620" height="28" rx="0" fill="#21262d" stroke="#d29922" stroke-width="1.5"/>
+  <text x="340" y="171" fill="#d29922" font-size="12" font-weight="700" text-anchor="middle">SYSTEM CALL INTERFACE (int 0x80 / syscall instruction) — Ring 0 boundary</text>
+
+  <!-- Kernel Space zone -->
+  <rect x="30" y="192" width="620" height="110" rx="10" fill="#0d2116" stroke="#3fb950" stroke-width="2"/>
+  <text x="48" y="214" fill="#3fb950" font-size="11" font-weight="700" letter-spacing="1">KERNEL SPACE (Ring 0)</text>
+
+  <!-- Kernel components -->
+  <rect x="55" y="222" width="110" height="64" rx="6" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="110" y="244" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">eBPF VM</text>
+  <text x="110" y="260" fill="#8b949e" font-size="9.5" text-anchor="middle">Verifier</text>
+  <text x="110" y="274" fill="#8b949e" font-size="9.5" text-anchor="middle">JIT Compiler</text>
+
+  <rect x="185" y="222" width="110" height="64" rx="6" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="240" y="244" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">VFS Layer</text>
+  <text x="240" y="260" fill="#8b949e" font-size="9.5" text-anchor="middle">File system</text>
+  <text x="240" y="274" fill="#8b949e" font-size="9.5" text-anchor="middle">management</text>
+
+  <rect x="315" y="222" width="110" height="64" rx="6" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="370" y="244" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Sched.</text>
+  <text x="370" y="260" fill="#8b949e" font-size="9.5" text-anchor="middle">Process</text>
+  <text x="370" y="274" fill="#8b949e" font-size="9.5" text-anchor="middle">Scheduling</text>
+
+  <rect x="445" y="222" width="110" height="64" rx="6" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="500" y="244" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Net Stack</text>
+  <text x="500" y="260" fill="#8b949e" font-size="9.5" text-anchor="middle">TCP/IP</text>
+  <text x="500" y="274" fill="#8b949e" font-size="9.5" text-anchor="middle">Sockets</text>
+
+  <!-- Arrows: syscall -->
+  <line x1="225" y1="124" x2="225" y2="150" stroke="#d29922" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="350" y1="124" x2="350" y2="150" stroke="#f85149" stroke-width="2" marker-end="url(#arr)"/>
+</svg>
+<div class="diagram-caption">চিত্র ১: Kernel Space ও User Space — Hardware Ring Protection</div>
+</div>
+
+<table>
+  <tr><th>বৈশিষ্ট্য</th><th>User Space (Ring 3)</th><th>Kernel Space (Ring 0)</th></tr>
+  <tr><td>Access Level</td><td>সীমিত — সরাসরি hardware access নেই</td><td>সম্পূর্ণ — সব hardware control করতে পারে</td></tr>
+  <tr><td>Memory</td><td>Virtual memory (isolated)</td><td>Physical memory সরাসরি</td></tr>
+  <tr><td>Crash হলে</td><td>শুধু ওই process মরে</td><td>পুরো system crash (Kernel Panic)</td></tr>
+  <tr><td>আমাদের প্রজেক্টে</td><td>detector.py, dashboard.py</td><td>ebpf_sensor.c</td></tr>
+</table>
+
+<h3 id="s2-2">২.২ System Calls (Syscalls)</h3>
+
+<p>
+  User space program কার্নেলের কোনো সুবিধা নিতে চাইলে <strong>System Call</strong> করতে হয়।
+  এটা অনেকটা "অনুরোধ" এর মতো — প্রোগ্রাম বলে "হে কার্নেল, আমার জন্য এই ফাইলটা খুলে দাও।"
+</p>
+
+<!-- Diagram 2: Syscall Flow -->
+<div class="diagram">
+<svg width="660" height="200" viewBox="0 0 660 200" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" font-size="12">
+  <defs>
+    <marker id="a2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#58a6ff"/></marker>
+    <marker id="a3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3fb950"/></marker>
+  </defs>
+
+  <!-- Step boxes -->
+  <rect x="20" y="75" width="110" height="50" rx="8" fill="#0d1f3c" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="75" y="97" fill="#58a6ff" font-weight="600" text-anchor="middle">Application</text>
+  <text x="75" y="113" fill="#8b949e" text-anchor="middle">open("file")</text>
+
+  <line x1="132" y1="100" x2="168" y2="100" stroke="#58a6ff" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="150" y="92" fill="#d29922" font-size="10" text-anchor="middle">syscall</text>
+
+  <rect x="170" y="75" width="120" height="50" rx="8" fill="#272115" stroke="#d29922" stroke-width="1.5"/>
+  <text x="230" y="97" fill="#d29922" font-weight="600" text-anchor="middle">Syscall Table</text>
+  <text x="230" y="113" fill="#8b949e" text-anchor="middle">NR=257 (openat)</text>
+
+  <line x1="292" y1="100" x2="328" y2="100" stroke="#d29922" stroke-width="2" marker-end="url(#a2)"/>
+
+  <rect x="330" y="60" width="130" height="80" rx="8" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="395" y="85" fill="#3fb950" font-weight="600" text-anchor="middle">eBPF Hook</text>
+  <text x="395" y="101" fill="#8b949e" text-anchor="middle">TRACEPOINT</text>
+  <text x="395" y="117" fill="#8b949e" text-anchor="middle">sys_enter_openat</text>
+  <text x="395" y="130" fill="#f85149" font-size="10" text-anchor="middle">← আমাদের sensor!</text>
+
+  <line x1="462" y1="100" x2="498" y2="100" stroke="#3fb950" stroke-width="2" marker-end="url(#a3)"/>
+
+  <rect x="500" y="75" width="120" height="50" rx="8" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="560" y="97" fill="#3fb950" font-weight="600" text-anchor="middle">Kernel Handler</text>
+  <text x="560" y="113" fill="#8b949e" text-anchor="middle">do_sys_open()</text>
+
+  <!-- Labels -->
+  <text x="75" y="155" fill="#8b949e" font-size="10" text-anchor="middle">User Space</text>
+  <text x="230" y="155" fill="#8b949e" font-size="10" text-anchor="middle">Kernel Entry</text>
+  <text x="395" y="155" fill="#3fb950" font-size="10" text-anchor="middle">আমরা এখানে hook করি</text>
+  <text x="560" y="155" fill="#8b949e" font-size="10" text-anchor="middle">Kernel Space</text>
+</svg>
+<div class="diagram-caption">চিত্র ২: System Call এর flow এবং eBPF hook point</div>
+</div>
+
+<p>আমাদের প্রজেক্টে আমরা দুটো syscall hook করি:</p>
+<table>
+  <tr><th>Syscall</th><th>Number</th><th>কখন trigger হয়</th><th>আমরা কী জানতে চাই</th></tr>
+  <tr><td><code>openat</code></td><td>257</td><td>যখন কোনো process ফাইল খুলতে চায়</td><td>কে, কোন ফাইল, কতবার</td></tr>
+  <tr><td><code>execve</code></td><td>59</td><td>যখন নতুন প্রোগ্রাম চালু হয়</td><td>কোন প্রোগ্রাম, কে চালালো</td></tr>
+</table>
+
+<h3 id="s2-3">২.৩ Process Management</h3>
+<p>
+  Linux এ প্রতিটি চলমান program কে <strong>Process</strong> বলে। প্রতিটি process এর একটি
+  <strong>PCB (Process Control Block)</strong> থাকে যেখানে সব তথ্য রাখা হয়।
+</p>
+
+<table>
+  <tr><th>তথ্য</th><th>ব্যাখ্যা</th><th>আমাদের প্রজেক্টে ব্যবহার</th></tr>
+  <tr><td><strong>PID</strong></td><td>Process ID — unique identifier</td><td>কোন process সমস্যা করছে চিহ্নিত করতে</td></tr>
+  <tr><td><strong>PPID</strong></td><td>Parent Process ID</td><td>কে এই process তৈরি করলো</td></tr>
+  <tr><td><strong>UID/GID</strong></td><td>User/Group ID — কে চালাচ্ছে</td><td>root process কিনা check</td></tr>
+  <tr><td><strong>comm</strong></td><td>Process name (max 16 char)</td><td>malware_sim, curl etc. দেখাতে</td></tr>
+  <tr><td><strong>Task struct</strong></td><td>Kernel এ PCB এর implementation</td><td>bpf_get_current_comm() দিয়ে পড়া হয়</td></tr>
+</table>
+
+<h3 id="s2-4">২.৪ Virtual Memory</h3>
+<p>
+  প্রতিটি process মনে করে তার কাছে পুরো memory আছে — কিন্তু এটা illusion।
+  Kernel <strong>Virtual Address Space</strong> maintain করে। eBPF data পড়তে আমরা
+  <code>bpf_probe_read_user_str()</code> ব্যবহার করি কারণ user space pointer directly
+  kernel থেকে access করা unsafe।
+</p>
+
+<!-- ══ SECTION 3 ══════════════════════════════════════════════════════════ -->
+<h2 id="s3" class="page-break"><span class="num">৩</span> eBPF — গভীরে জানো</h2>
+
+<h3 id="s3-1">৩.১ BPF এর ইতিহাস</h3>
+<table>
+  <tr><th>সাল</th><th>ঘটনা</th></tr>
+  <tr><td>1992</td><td>BSD Packet Filter (BPF) — Steven McCanne & Van Jacobson। শুধু network packet filter করার জন্য।</td></tr>
+  <tr><td>1997</td><td>Linux kernel এ BPF include হয় (শুধু tcpdump filter)</td></tr>
+  <tr><td>2014</td><td><strong>eBPF</strong> — Alexei Starovoitov Linux 3.18 তে যোগ করেন। Register 4→11, 64-bit, maps, helper functions।</td></tr>
+  <tr><td>2016+</td><td>XDP, socket filter, kprobe, tracepoint, perf event সব যোগ হয়।</td></tr>
+  <tr><td>আজ</td><td>Netflix, Google, Meta, Cloudflare, Microsoft — সবাই production এ।</td></tr>
+</table>
+
+<h3 id="s3-2">৩.২ eBPF Virtual Machine (VM)</h3>
+
+<p>eBPF হলো Linux কার্নেলের ভেতরে একটা mini computer। এর নিজস্ব:</p>
+<ul>
+  <li><strong>11টি 64-bit register</strong> (r0–r10) — r10 হলো stack pointer (read-only)</li>
+  <li><strong>নিজস্ব Instruction Set</strong> — load, store, jump, call, arithmetic</li>
+  <li><strong>512 bytes stack</strong> — শুধু, বেশি না</li>
+  <li><strong>Helper Functions</strong> — kernel এর সাথে কথা বলার নিরাপদ রাস্তা</li>
+</ul>
+
+<!-- Diagram 3: eBPF VM -->
+<div class="diagram">
+<svg width="680" height="280" viewBox="0 0 680 280" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <marker id="ab" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3fb950"/></marker>
+    <marker id="ay" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#d29922"/></marker>
+    <marker id="ar" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- eBPF C Code -->
+  <rect x="20" y="20" width="130" height="60" rx="8" fill="#0d1f3c" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="85" y="45" fill="#58a6ff" font-weight="600" font-size="12" text-anchor="middle">eBPF C Code</text>
+  <text x="85" y="62" fill="#8b949e" font-size="10" text-anchor="middle">ebpf_sensor.c</text>
+  <text x="85" y="74" fill="#8b949e" font-size="10" text-anchor="middle">(আমরা লিখি)</text>
+
+  <!-- Clang/LLVM -->
+  <line x1="152" y1="50" x2="188" y2="50" stroke="#58a6ff" stroke-width="2" marker-end="url(#ab)"/>
+  <rect x="190" y="20" width="130" height="60" rx="8" fill="#272115" stroke="#d29922" stroke-width="1.5"/>
+  <text x="255" y="42" fill="#d29922" font-weight="600" font-size="12" text-anchor="middle">Clang/LLVM</text>
+  <text x="255" y="58" fill="#8b949e" font-size="10" text-anchor="middle">Compile to</text>
+  <text x="255" y="71" fill="#8b949e" font-size="10" text-anchor="middle">BPF Bytecode</text>
+
+  <!-- BCC does this automatically -->
+  <text x="255" y="94" fill="#3fb950" font-size="9" text-anchor="middle">← BCC automatically করে</text>
+
+  <!-- Verifier -->
+  <line x1="322" y1="50" x2="358" y2="50" stroke="#d29922" stroke-width="2" marker-end="url(#ay)"/>
+  <rect x="360" y="10" width="130" height="82" rx="8" fill="#1f0d0d" stroke="#f85149" stroke-width="1.5"/>
+  <text x="425" y="38" fill="#f85149" font-weight="600" font-size="12" text-anchor="middle">🔍 Verifier</text>
+  <text x="425" y="55" fill="#8b949e" font-size="10" text-anchor="middle">• Infinite loop check</text>
+  <text x="425" y="68" fill="#8b949e" font-size="10" text-anchor="middle">• Memory safety</text>
+  <text x="425" y="81" fill="#8b949e" font-size="10" text-anchor="middle">• Pointer validation</text>
+
+  <!-- JIT -->
+  <line x1="492" y1="50" x2="528" y2="50" stroke="#f85149" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="530" y="20" width="130" height="60" rx="8" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="595" y="42" fill="#3fb950" font-weight="600" font-size="12" text-anchor="middle">JIT Compiler</text>
+  <text x="595" y="58" fill="#8b949e" font-size="10" text-anchor="middle">BPF → x86_64</text>
+  <text x="595" y="70" fill="#8b949e" font-size="10" text-anchor="middle">native code</text>
+
+  <!-- eBPF Maps -->
+  <rect x="190" y="160" width="300" height="90" rx="8" fill="#0a1c10" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="340" y="185" fill="#3fb950" font-weight="600" font-size="13" text-anchor="middle">eBPF Maps (Shared Memory)</text>
+  <text x="240" y="205" fill="#8b949e" font-size="11" text-anchor="middle">BPF_HASH</text>
+  <text x="340" y="205" fill="#8b949e" font-size="11" text-anchor="middle">BPF_ARRAY</text>
+  <text x="440" y="205" fill="#8b949e" font-size="11" text-anchor="middle">PERF_BUFFER</text>
+  <text x="240" y="222" fill="#79c0ff" font-size="9" text-anchor="middle">read_count map</text>
+  <text x="340" y="222" fill="#79c0ff" font-size="9" text-anchor="middle">counters</text>
+  <text x="440" y="222" fill="#79c0ff" font-size="9" text-anchor="middle">file_events</text>
+  <text x="340" y="240" fill="#d29922" font-size="10" text-anchor="middle">← Kernel ↔ User Space IPC mechanism</text>
+
+  <!-- Arrows to Maps -->
+  <line x1="595" y1="82" x2="595" y2="140" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="595" y1="140" x2="430" y2="160" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ab)"/>
+  <line x1="85" y1="82" x2="85" y2="200" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="85" y1="200" x2="188" y2="200" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ab)"/>
+  <text x="85" y="155" fill="#8b949e" font-size="9.5" text-anchor="middle">reads maps</text>
+  <text x="85" y="166" fill="#8b949e" font-size="9.5" text-anchor="middle">(user space)</text>
+</svg>
+<div class="diagram-caption">চিত্র ৩: eBPF কোড compile থেকে kernel এ run হওয়া পর্যন্ত পুরো flow</div>
+</div>
+
+<h3 id="s3-3">৩.৩ eBPF Verifier — Safety Guard</h3>
+
+<div class="callout callout-alert">
+  <strong>⚠️ Verifier কেন দরকার?</strong>
+  eBPF code kernel এর ভেতরে run হয়। একটা ভুল code পুরো OS কে crash করতে পারে। তাই kernel নিজেই code টা load করার আগে verify করে।
+</div>
+
+<p>Verifier যা check করে:</p>
+<ul>
+  <li><strong>Termination guarantee</strong> — কোনো infinite loop নেই (BPF program কে শেষ হতেই হবে)</li>
+  <li><strong>Memory bounds</strong> — array/map access কখনো out-of-bounds না</li>
+  <li><strong>Null pointer check</strong> — map lookup এর পর null check বাধ্যতামূলক</li>
+  <li><strong>Stack limit</strong> — 512 bytes এর বেশি stack use করা যাবে না</li>
+  <li><strong>Helper validation</strong> — শুধু approved kernel helpers ডাকা যাবে</li>
+</ul>
+
+<pre><code><span class="cm">/* Verifier কেন এই code reject করবে: */</span>
+<span class="type">u64</span> *count = read_count.lookup(&pid);
+(*count)++;  <span class="cm">// ERROR! count হয়তো NULL, check করতে হবে</span>
+
+<span class="cm">/* Correct — Verifier এটা accept করবে: */</span>
+<span class="type">u64</span> *count = read_count.lookup_or_try_init(&pid, &zero);
+<span class="kw">if</span> (count) {        <span class="cm">// null check বাধ্যতামূলক</span>
+    (*count)++;
+}</code></pre>
+
+<h3 id="s3-4">৩.৪ JIT Compilation</h3>
+<p>
+  Verifier pass করলে eBPF bytecode কে <strong>JIT (Just-In-Time) Compiler</strong>
+  x86_64 native machine code এ convert করে। এর ফলে eBPF প্রায় native C code এর সমান speed এ চলে।
+</p>
+
+<h3 id="s3-5">৩.৫ Hook Points — কোথায় attach করা যায়</h3>
+<table>
+  <tr><th>Hook Type</th><th>কোথায়</th><th>আমাদের প্রজেক্টে</th></tr>
+  <tr><td><strong>Tracepoint</strong></td><td>Kernel এর static, stable event points</td><td>✅ <code>sys_enter_openat</code>, <code>sys_enter_execve</code></td></tr>
+  <tr><td>kprobe</td><td>যেকোনো kernel function এ dynamic</td><td>পরে যোগ করা যাবে</td></tr>
+  <tr><td>XDP</td><td>Network card থেকে packet আসার সাথে সাথে</td><td>Network monitoring এ</td></tr>
+  <tr><td>TC (Traffic Control)</td><td>Network stack এর ভেতরে</td><td>Deep packet inspection</td></tr>
+  <tr><td>LSM</td><td>Linux Security Module hooks</td><td>Access control enforcement</td></tr>
+</table>
+
+<div class="callout callout-tip">
+  <strong>💡 Tracepoint vs kprobe:</strong>
+  Tracepoint হলো kernel developers এর দেওয়া "stable" event — kernel update হলেও এটা break হয় না।
+  kprobe যেকোনো function এ লাগানো যায় কিন্তু kernel update এ break হতে পারে।
+  তাই আমরা Tracepoint বেছে নিয়েছি।
+</div>
+
+<h3 id="s3-6">৩.৬ eBPF Maps — Kernel ↔ User Space Communication (IPC)</h3>
+
+<p>
+  eBPF Maps হলো এই প্রজেক্টের সবচেয়ে গুরুত্বপূর্ণ concept।
+  এটা হলো <strong>shared memory</strong> যেটা kernel space ও user space দুদিক থেকে access করা যায়।
+  এটাই আমাদের <strong>IPC (Inter-Process Communication) mechanism</strong>।
+</p>
+
+<table>
+  <tr><th>Map Type</th><th>কাজ</th><th>আমাদের ব্যবহার</th></tr>
+  <tr><td><code>BPF_HASH</code></td><td>Key-value store (dictionary)</td><td><code>read_count</code> — প্রতি PID কতবার file read করলো</td></tr>
+  <tr><td><code>BPF_PERF_OUTPUT</code></td><td>Ring buffer — kernel→user streaming</td><td><code>file_events</code>, <code>proc_events</code> — live event stream</td></tr>
+  <tr><td><code>BPF_ARRAY</code></td><td>Fixed-size indexed array</td><td>Global counters এ ব্যবহার হয়</td></tr>
+  <tr><td><code>BPF_RINGBUF</code></td><td>Modern ring buffer (kernel 5.8+)</td><td>PERF_OUTPUT এর improved version</td></tr>
+</table>
+
+<!-- ══ SECTION 4 ══════════════════════════════════════════════════════════ -->
+<h2 id="s4" class="page-break"><span class="num">৪</span> Security Theory</h2>
+
+<h3 id="s4-1">৪.১ Threat Model</h3>
+<p>
+  আমাদের প্রজেক্ট কোন ধরনের threat detect করে সেটা define করতে হবে। এটাকে বলে <strong>Threat Modeling</strong>।
+</p>
+<table>
+  <tr><th>Threat</th><th>MITRE ATT&CK ID</th><th>আমাদের Detection</th></tr>
+  <tr><td>Data Exfiltration</td><td>T1005, T1552</td><td>High-speed file read (&gt;50/sec)</td></tr>
+  <tr><td>Credential Access</td><td>T1003</td><td><code>/etc/passwd</code>, <code>/.ssh/</code> access alert</td></tr>
+  <tr><td>Defense Evasion</td><td>T1562</td><td>Suspicious process spawn</td></tr>
+  <tr><td>Resource Hijacking</td><td>T1496</td><td>Abnormal process behavior</td></tr>
+</table>
+
+<h3 id="s4-2">৪.২ Anomaly Detection</h3>
+<p>আমরা <strong>Threshold-based Anomaly Detection</strong> ব্যবহার করি:</p>
+<ul>
+  <li><strong>Rate-based</strong>: ১ সেকেন্ডে ৫০টির বেশি file open → ALERT</li>
+  <li><strong>Pattern-based</strong>: Sensitive path access → ALERT</li>
+  <li><strong>Signature-based</strong>: <code>ncat</code>, <code>socat</code> এর মতো tool → WARN</li>
+  <li><strong>Whitelist-based</strong>: Known good processes (<code>systemd</code>, <code>bash</code>) skip</li>
+</ul>
+
+<h3 id="s4-3">৪.৩ Data Exfiltration — কীভাবে detect করি</h3>
+<div class="flow">
+  <div class="flow-box kernel">malware starts</div>
+  <span class="flow-arr">→</span>
+  <div class="flow-box kernel">opens 100 files/sec</div>
+  <span class="flow-arr">→</span>
+  <div class="flow-box">openat syscall ×100</div>
+  <span class="flow-arr">→</span>
+  <div class="flow-box user">eBPF counter++</div>
+  <span class="flow-arr">→</span>
+  <div class="flow-box security">threshold check</div>
+  <span class="flow-arr">→</span>
+  <div class="flow-box security">🚨 ALERT</div>
+</div>
+
+<!-- ══ SECTION 5 ══════════════════════════════════════════════════════════ -->
+<h2 id="s5" class="page-break"><span class="num">৫</span> প্রজেক্ট Architecture</h2>
+
+<!-- Diagram 4: Full Architecture -->
+<div class="diagram">
+<svg width="680" height="460" viewBox="0 0 680 460" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <marker id="ac" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#58a6ff"/></marker>
+    <marker id="ag" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3fb950"/></marker>
+    <marker id="ao" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- Browser Layer -->
+  <rect x="20" y="20" width="640" height="80" rx="10" fill="#0d1f3c" stroke="#58a6ff" stroke-width="2"/>
+  <text x="340" y="44" fill="#58a6ff" font-weight="700" font-size="12" text-anchor="middle" letter-spacing="1">BROWSER LAYER</text>
+  <rect x="50" y="56" width="140" height="34" rx="6" fill="#0a172e" stroke="#58a6ff" stroke-width="1"/>
+  <text x="120" y="70" fill="#79c0ff" font-size="11" font-weight="600" text-anchor="middle">📊 Chart.js</text>
+  <text x="120" y="83" fill="#8b949e" font-size="9.5" text-anchor="middle">Real-time Timeline</text>
+  <rect x="210" y="56" width="150" height="34" rx="6" fill="#0a172e" stroke="#58a6ff" stroke-width="1"/>
+  <text x="285" y="70" fill="#79c0ff" font-size="11" font-weight="600" text-anchor="middle">📋 Event Log Table</text>
+  <text x="285" y="83" fill="#8b949e" font-size="9.5" text-anchor="middle">Filter: Alert/Warn/Info</text>
+  <rect x="380" y="56" width="140" height="34" rx="6" fill="#0a172e" stroke="#58a6ff" stroke-width="1"/>
+  <text x="450" y="70" fill="#79c0ff" font-size="11" font-weight="600" text-anchor="middle">🔔 Toast Alerts</text>
+  <text x="450" y="83" fill="#8b949e" font-size="9.5" text-anchor="middle">Live notifications</text>
+  <rect x="535" y="56" width="110" height="34" rx="6" fill="#0a172e" stroke="#58a6ff" stroke-width="1"/>
+  <text x="590" y="70" fill="#79c0ff" font-size="11" font-weight="600" text-anchor="middle">🔥 Top Procs</text>
+  <text x="590" y="83" fill="#8b949e" font-size="9.5" text-anchor="middle">Bar chart</text>
+
+  <!-- SSE Arrow -->
+  <text x="340" y="118" fill="#d29922" font-size="11" font-weight="600" text-anchor="middle">⬆ Server-Sent Events (SSE) — /stream endpoint</text>
+  <line x1="340" y1="102" x2="340" y2="126" stroke="#d29922" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ac)"/>
+
+  <!-- Flask Layer -->
+  <rect x="20" y="128" width="640" height="100" rx="10" fill="#1a1200" stroke="#d29922" stroke-width="2"/>
+  <text x="340" y="150" fill="#d29922" font-weight="700" font-size="12" text-anchor="middle" letter-spacing="1">USER SPACE — Flask Backend (dashboard.py)</text>
+
+  <rect x="50" y="162" width="130" height="52" rx="6" fill="#100e00" stroke="#9e6a03" stroke-width="1"/>
+  <text x="115" y="182" fill="#d29922" font-size="11" font-weight="600" text-anchor="middle">Flask Routes</text>
+  <text x="115" y="196" fill="#8b949e" font-size="9.5" text-anchor="middle">/ → index.html</text>
+  <text x="115" y="208" fill="#8b949e" font-size="9.5" text-anchor="middle">/stream /api/*</text>
+
+  <rect x="200" y="162" width="150" height="52" rx="6" fill="#100e00" stroke="#9e6a03" stroke-width="1"/>
+  <text x="275" y="182" fill="#d29922" font-size="11" font-weight="600" text-anchor="middle">Detection Logic</text>
+  <text x="275" y="196" fill="#8b949e" font-size="9.5" text-anchor="middle">Rate threshold check</text>
+  <text x="275" y="208" fill="#8b949e" font-size="9.5" text-anchor="middle">Sensitive path match</text>
+
+  <rect x="370" y="162" width="140" height="52" rx="6" fill="#100e00" stroke="#9e6a03" stroke-width="1"/>
+  <text x="440" y="182" fill="#d29922" font-size="11" font-weight="600" text-anchor="middle">Event Queue</text>
+  <text x="440" y="196" fill="#8b949e" font-size="9.5" text-anchor="middle">Thread-safe queue</text>
+  <text x="440" y="208" fill="#8b949e" font-size="9.5" text-anchor="middle">BPF→SSE bridge</text>
+
+  <rect x="530" y="162" width="110" height="52" rx="6" fill="#100e00" stroke="#9e6a03" stroke-width="1"/>
+  <text x="585" y="182" fill="#d29922" font-size="11" font-weight="600" text-anchor="middle">Stats &amp; Log</text>
+  <text x="585" y="196" fill="#8b949e" font-size="9.5" text-anchor="middle">recent_events[]</text>
+  <text x="585" y="208" fill="#8b949e" font-size="9.5" text-anchor="middle">top_procs dict</text>
+
+  <!-- Maps boundary -->
+  <text x="340" y="248" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">⬇ BPF Perf Ring Buffer (eBPF Maps — Kernel/User IPC) ⬇</text>
+  <line x1="340" y1="230" x2="340" y2="254" stroke="#3fb950" stroke-width="2.5" marker-end="url(#ag)"/>
+
+  <!-- Kernel Layer -->
+  <rect x="20" y="258" width="640" height="120" rx="10" fill="#0a1c10" stroke="#3fb950" stroke-width="2"/>
+  <text x="340" y="280" fill="#3fb950" font-weight="700" font-size="12" text-anchor="middle" letter-spacing="1">KERNEL SPACE — eBPF Sensor (ebpf_sensor.c)</text>
+
+  <rect x="50" y="292" width="160" height="70" rx="6" fill="#061008" stroke="#3fb950" stroke-width="1"/>
+  <text x="130" y="312" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Tracepoint: openat</text>
+  <text x="130" y="327" fill="#8b949e" font-size="9.5" text-anchor="middle">Collects: PID, UID,</text>
+  <text x="130" y="340" fill="#8b949e" font-size="9.5" text-anchor="middle">comm, filename</text>
+  <text x="130" y="353" fill="#79c0ff" font-size="9.5" text-anchor="middle">→ file_events map</text>
+
+  <rect x="260" y="292" width="160" height="70" rx="6" fill="#061008" stroke="#3fb950" stroke-width="1"/>
+  <text x="340" y="312" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Tracepoint: execve</text>
+  <text x="340" y="327" fill="#8b949e" font-size="9.5" text-anchor="middle">Collects: PID, PPID,</text>
+  <text x="340" y="340" fill="#8b949e" font-size="9.5" text-anchor="middle">comm, executable</text>
+  <text x="340" y="353" fill="#79c0ff" font-size="9.5" text-anchor="middle">→ proc_events map</text>
+
+  <rect x="470" y="292" width="170" height="70" rx="6" fill="#061008" stroke="#3fb950" stroke-width="1"/>
+  <text x="555" y="312" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">BPF_HASH Map</text>
+  <text x="555" y="327" fill="#8b949e" font-size="9.5" text-anchor="middle">read_count[pid]</text>
+  <text x="555" y="340" fill="#8b949e" font-size="9.5" text-anchor="middle">per-PID counter</text>
+  <text x="555" y="353" fill="#79c0ff" font-size="9.5" text-anchor="middle">atomic increment</text>
+
+  <!-- Syscall Interface -->
+  <rect x="20" y="392" width="640" height="30" rx="0" fill="#1a1200" stroke="#9e6a03" stroke-width="1"/>
+  <text x="340" y="411" fill="#d29922" font-size="11" font-weight="600" text-anchor="middle">System Call Interface — Linux Kernel 7.0</text>
+
+  <!-- Apps at bottom -->
+  <rect x="20" y="432" width="640" height="22" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <text x="340" y="447" fill="#8b949e" font-size="10" text-anchor="middle">Applications: bash  |  python3  |  curl  |  nginx  |  malware_sim  |  data_stealer  |  ...</text>
+</svg>
+<div class="diagram-caption">চিত্র ৪: সম্পূর্ণ প্রজেক্ট Architecture — Browser থেকে Kernel পর্যন্ত</div>
+</div>
+
+<!-- ══ SECTION 6 ══════════════════════════════════════════════════════════ -->
+<h2 id="s6" class="page-break"><span class="num">৬</span> Code Walkthrough — লাইন বাই লাইন</h2>
+
+<h3 id="s6-1">৬.১ ebpf_sensor.c — Kernel Space Sensor</h3>
+
+<p>এই ফাইলটা কার্নেলের ভেতরে চলে। BCC runtime এ এটা compile করে।</p>
+
+<h4>Data Structures — কী ডেটা পাঠাবো?</h4>
+<pre><code><span class="cm">// ফাইল event এর জন্য structure</span>
+<span class="kw">struct</span> <span class="type">file_event_t</span> {
+    <span class="type">u32</span> pid;              <span class="cm">// কোন process?</span>
+    <span class="type">u32</span> uid;              <span class="cm">// কোন user এর process?</span>
+    <span class="type">char</span> comm[TASK_COMM_LEN];  <span class="cm">// process এর নাম (max 16 char)</span>
+    <span class="type">char</span> filename[256];   <span class="cm">// কোন ফাইল?</span>
+};</code></pre>
+
+<h4>Maps — IPC Channel</h4>
+<pre><code><span class="cm">// Ring buffer: kernel → user space event streaming</span>
+BPF_PERF_OUTPUT(file_events);    <span class="cm">// file open events</span>
+BPF_PERF_OUTPUT(proc_events);   <span class="cm">// process spawn events</span>
+
+<span class="cm">// Hash map: pid → কতবার file read করলো</span>
+BPF_HASH(read_count, <span class="type">u32</span>, <span class="type">u64</span>);</code></pre>
+
+<h4>Tracepoint Hook — কীভাবে syscall ধরি?</h4>
+<pre><code>TRACEPOINT_PROBE(syscalls, sys_enter_openat) {
+    <span class="kw">struct</span> <span class="type">file_event_t</span> event = {};
+
+    <span class="cm">// PID পাওয়া: upper 32 bit = PID, lower 32 = TID</span>
+    event.pid = bpf_get_current_pid_tgid() >> <span class="num">32</span>;
+    event.uid = bpf_get_current_uid_gid() & <span class="num">0xFFFFFFFF</span>;
+
+    <span class="cm">// Process name — task_struct.comm থেকে পড়া</span>
+    bpf_get_current_comm(&event.comm, <span class="kw">sizeof</span>(event.comm));
+
+    <span class="cm">// User space pointer safely পড়া (বিপজ্জনক! তাই probe_read_user_str)</span>
+    bpf_probe_read_user_str(&event.filename,
+                            <span class="kw">sizeof</span>(event.filename),
+                            args->filename);
+
+    <span class="cm">// Counter বাড়াও (atomic, lock-free)</span>
+    <span class="type">u64</span> zero = <span class="num">0</span>;
+    <span class="type">u64</span> *count = read_count.lookup_or_try_init(&event.pid, &zero);
+    <span class="kw">if</span> (count) (*count)++;  <span class="cm">// verifier requires null check!</span>
+
+    <span class="cm">// User space এ পাঠাও (perf ring buffer দিয়ে)</span>
+    file_events.perf_submit(args, &event, <span class="kw">sizeof</span>(event));
+    <span class="kw">return</span> <span class="num">0</span>;
+}</code></pre>
+
+<div class="callout callout-tip">
+  <strong>💡 কেন <code>bpf_probe_read_user_str</code>?</strong>
+  User space pointer কে kernel space থেকে সরাসরি dereference করা unsafe — page fault হতে পারে।
+  এই helper function টা safely পড়ে এবং error handle করে।
+</div>
+
+<h3 id="s6-2">৬.২ detector.py — User Space Brain</h3>
+
+<h4>BCC দিয়ে eBPF লোড করা</h4>
+<pre><code><span class="kw">from</span> bcc <span class="kw">import</span> BPF
+
+<span class="cm"># C code পড়ো ও compile করো (BCC internally clang/llvm ব্যবহার করে)</span>
+<span class="kw">with</span> open(<span class="str">"ebpf_sensor.c"</span>) <span class="kw">as</span> f:
+    bpf_src = f.read()
+
+bpf = BPF(text=bpf_src)  <span class="cm"># compile + load into kernel</span>
+
+<span class="cm"># Perf buffer callback attach করো</span>
+bpf[<span class="str">"file_events"</span>].open_perf_buffer(handle_file_event)
+bpf[<span class="str">"proc_events"</span>].open_perf_buffer(handle_proc_event)</code></pre>
+
+<h4>Detection Logic — "Thief" চেনার নিয়ম</h4>
+<pre><code><span class="kw">def</span> <span class="fn">handle_file_event</span>(cpu, data, size):
+    event = bpf[<span class="str">"file_events"</span>].event(data)   <span class="cm"># ctypes struct</span>
+    pid   = event.pid
+    comm  = event.comm.decode(<span class="str">"utf-8"</span>).strip()
+    fname = event.filename.decode(<span class="str">"utf-8"</span>).strip()
+
+    <span class="cm"># ১. Whitelist check — known good processes skip</span>
+    <span class="kw">if</span> comm <span class="kw">in</span> WHITELIST_PROCESSES:
+        <span class="kw">return</span>
+
+    <span class="cm"># ২. Rate window reset প্রতি WINDOW_SECONDS এ</span>
+    <span class="kw">if</span> time.time() - last_reset >= WINDOW_SECONDS:
+        file_counts.clear()
+
+    file_counts[pid] += <span class="num">1</span>
+
+    <span class="cm"># ৩. Sensitive file detection</span>
+    <span class="kw">if</span> is_sensitive(fname):
+        log_event(<span class="str">"ALERT"</span>, pid, comm, f<span class="str">"Sensitive file: {fname}"</span>)
+
+    <span class="cm"># ৪. Rate-based detection</span>
+    <span class="kw">if</span> file_counts[pid] > FILE_READ_THRESHOLD:
+        log_event(<span class="str">"ALERT"</span>, pid, comm, <span class="str">"Exfiltration suspected"</span>)</code></pre>
+
+<h3 id="s6-3">৬.৩ dashboard.py — Flask Web Server</h3>
+
+<h4>Threading Architecture</h4>
+<pre><code><span class="cm"># BPF monitoring ও Flask — দুটো আলাদা thread এ চলে</span>
+<span class="cm"># Thread-safe queue দিয়ে communicate করে</span>
+
+event_queue = queue.Queue(maxsize=<span class="num">500</span>)  <span class="cm"># Thread-safe!</span>
+
+<span class="cm"># Thread 1: BPF event loop (blocking)</span>
+t = threading.Thread(target=bpf_thread, daemon=<span class="kw">True</span>)
+t.start()
+
+<span class="cm"># Thread 2: Flask HTTP server</span>
+app.run(host=<span class="str">"0.0.0.0"</span>, port=<span class="num">5000</span>, threaded=<span class="kw">True</span>)</code></pre>
+
+<h4>SSE — Server-Sent Events</h4>
+<pre><code>@app.route(<span class="str">"/stream"</span>)
+<span class="kw">def</span> <span class="fn">stream</span>():
+    <span class="cm">"""Browser এটা open রাখে — server push করে data"""</span>
+    <span class="kw">def</span> <span class="fn">event_generator</span>():
+        <span class="kw">while</span> <span class="kw">True</span>:
+            ev = event_queue.get(timeout=<span class="num">15</span>)  <span class="cm"># block করে অপেক্ষা</span>
+            <span class="kw">yield</span> f<span class="str">"data: {json.dumps(ev)}\n\n"</span>  <span class="cm"># SSE format!</span>
+            <span class="cm"># timeout হলে heartbeat পাঠাও</span>
+
+    <span class="kw">return</span> Response(event_generator(),
+                    mimetype=<span class="str">"text/event-stream"</span>)  <span class="cm"># special MIME type</span></code></pre>
+
+<div class="callout callout-info">
+  <strong>📡 SSE vs WebSocket:</strong>
+  SSE হলো one-way (server→browser) এবং HTTP এর উপর চলে — WebSocket এর মতো আলাদা protocol লাগে না।
+  আমাদের case এ browser থেকে server এ কিছু পাঠাতে হয় না, তাই SSE perfect।
+</div>
+
+<h3 id="s6-4">৬.৪ index.html — Frontend Dashboard</h3>
+
+<h4>EventSource API — SSE consume করা</h4>
+<pre><code><span class="cm">// Browser built-in API — কোনো library লাগে না</span>
+<span class="kw">const</span> evtSource = <span class="kw">new</span> <span class="fn">EventSource</span>(<span class="str">'/stream'</span>);
+
+evtSource.onmessage = (e) => {
+    <span class="kw">const</span> ev = JSON.<span class="fn">parse</span>(e.data);
+    <span class="fn">addRow</span>(ev);          <span class="cm">// table এ যোগ করো</span>
+    <span class="fn">updateBucket</span>(ev.level);  <span class="cm">// chart data আপডেট করো</span>
+    <span class="kw">if</span> (ev.level === <span class="str">'ALERT'</span>) <span class="fn">showToast</span>(ev);  <span class="cm">// popup</span>
+};</code></pre>
+
+<h4>Chart.js — Real-time Timeline</h4>
+<pre><code><span class="cm">// প্রতি ২ সেকেন্ডে chart আপডেট হয়</span>
+<span class="fn">setInterval</span>(() => {
+    labels.<span class="fn">shift</span>(); labels.<span class="fn">push</span>(currentTime);    <span class="cm">// x-axis slide</span>
+    alertData.<span class="fn">shift</span>(); alertData.<span class="fn">push</span>(bucket.alerts);  <span class="cm">// নতুন point</span>
+    chart.<span class="fn">update</span>(<span class="str">'none'</span>);  <span class="cm">// animation ছাড়া — performance</span>
+    bucket = { alerts: <span class="num">0</span>, warns: <span class="num">0</span>, infos: <span class="num">0</span> };  <span class="cm">// reset</span>
+}, <span class="num">2000</span>);</code></pre>
+
+<!-- ══ SECTION 7 ══════════════════════════════════════════════════════════ -->
+<h2 id="s7" class="page-break"><span class="num">৭</span> Data Flow — Event এর যাত্রা</h2>
+
+<!-- Diagram 5: Event Journey -->
+<div class="diagram">
+<svg width="680" height="340" viewBox="0 0 680 340" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <marker id="af" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#58a6ff"/></marker>
+  </defs>
+
+  <!-- Step 1 -->
+  <rect x="10" y="130" width="110" height="80" rx="8" fill="#1a0d0d" stroke="#f85149" stroke-width="2"/>
+  <text x="65" y="158" fill="#f85149" font-size="20" text-anchor="middle">😈</text>
+  <text x="65" y="178" fill="#f85149" font-weight="700" font-size="11" text-anchor="middle">malware_sim</text>
+  <text x="65" y="193" fill="#8b949e" font-size="10" text-anchor="middle">opens /etc/passwd</text>
+  <text x="65" y="122" fill="#8b949e" font-size="10" text-anchor="middle" font-style="italic">① Process</text>
+
+  <line x1="122" y1="170" x2="148" y2="170" stroke="#58a6ff" stroke-width="2" marker-end="url(#af)"/>
+
+  <!-- Step 2 -->
+  <rect x="150" y="130" width="110" height="80" rx="8" fill="#272115" stroke="#d29922" stroke-width="2"/>
+  <text x="205" y="158" fill="#d29922" font-size="20" text-anchor="middle">⚡</text>
+  <text x="205" y="174" fill="#d29922" font-weight="700" font-size="11" text-anchor="middle">openat syscall</text>
+  <text x="205" y="189" fill="#8b949e" font-size="10" text-anchor="middle">NR=257</text>
+  <text x="205" y="203" fill="#8b949e" font-size="10" text-anchor="middle">CPU trap → kernel</text>
+  <text x="205" y="122" fill="#8b949e" font-size="10" text-anchor="middle" font-style="italic">② Syscall</text>
+
+  <line x1="262" y1="170" x2="288" y2="170" stroke="#58a6ff" stroke-width="2" marker-end="url(#af)"/>
+
+  <!-- Step 3 -->
+  <rect x="290" y="110" width="110" height="110" rx="8" fill="#0a1c10" stroke="#3fb950" stroke-width="2"/>
+  <text x="345" y="140" fill="#3fb950" font-size="20" text-anchor="middle">🔬</text>
+  <text x="345" y="158" fill="#3fb950" font-weight="700" font-size="11" text-anchor="middle">eBPF Hook</text>
+  <text x="345" y="173" fill="#8b949e" font-size="10" text-anchor="middle">Collect:</text>
+  <text x="345" y="186" fill="#79c0ff" font-size="10" text-anchor="middle">PID, UID, comm</text>
+  <text x="345" y="199" fill="#79c0ff" font-size="10" text-anchor="middle">filename</text>
+  <text x="345" y="102" fill="#8b949e" font-size="10" text-anchor="middle" font-style="italic">③ eBPF Sensor</text>
+
+  <line x1="402" y1="170" x2="428" y2="170" stroke="#58a6ff" stroke-width="2" marker-end="url(#af)"/>
+
+  <!-- Step 4 -->
+  <rect x="430" y="130" width="110" height="80" rx="8" fill="#0a1c10" stroke="#3fb950" stroke-width="2"/>
+  <text x="485" y="154" fill="#3fb950" font-weight="700" font-size="11" text-anchor="middle">Perf Ring</text>
+  <text x="485" y="169" fill="#3fb950" font-weight="700" font-size="11" text-anchor="middle">Buffer</text>
+  <text x="485" y="184" fill="#8b949e" font-size="10" text-anchor="middle">Zero-copy</text>
+  <text x="485" y="197" fill="#8b949e" font-size="10" text-anchor="middle">kernel→user IPC</text>
+  <text x="485" y="122" fill="#8b949e" font-size="10" text-anchor="middle" font-style="italic">④ eBPF Map</text>
+
+  <line x1="542" y1="170" x2="568" y2="170" stroke="#58a6ff" stroke-width="2" marker-end="url(#af)"/>
+
+  <!-- Step 5 -->
+  <rect x="570" y="130" width="100" height="80" rx="8" fill="#0d1f3c" stroke="#58a6ff" stroke-width="2"/>
+  <text x="620" y="156" fill="#58a6ff" font-size="18" text-anchor="middle">🚨</text>
+  <text x="620" y="174" fill="#58a6ff" font-weight="700" font-size="11" text-anchor="middle">Detection</text>
+  <text x="620" y="188" fill="#8b949e" font-size="10" text-anchor="middle">Alert generated</text>
+  <text x="620" y="200" fill="#8b949e" font-size="10" text-anchor="middle">→ SSE → Browser</text>
+  <text x="620" y="122" fill="#8b949e" font-size="10" text-anchor="middle" font-style="italic">⑤ User Space</text>
+
+  <!-- Timeline bar at bottom -->
+  <text x="340" y="270" fill="#8b949e" font-size="11" text-anchor="middle">Total latency: &lt; 1 millisecond (kernel hook → browser display)</text>
+  <rect x="50" y="290" width="580" height="16" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"/>
+  <rect x="50" y="290" width="60" height="16" rx="3" fill="#3fb950"/>
+  <rect x="112" y="290" width="60" height="16" rx="3" fill="#d29922"/>
+  <rect x="174" y="290" width="100" height="16" rx="3" fill="#58a6ff"/>
+  <rect x="276" y="290" width="120" height="16" rx="3" fill="#8250df"/>
+  <text x="80" y="302" fill="#fff" font-size="8.5" text-anchor="middle">syscall</text>
+  <text x="142" y="302" fill="#fff" font-size="8.5" text-anchor="middle">eBPF run</text>
+  <text x="224" y="302" fill="#fff" font-size="8.5" text-anchor="middle">map write</text>
+  <text x="336" y="302" fill="#fff" font-size="8.5" text-anchor="middle">python callback</text>
+  <text x="460" y="302" fill="#8b949e" font-size="8.5" text-anchor="middle">SSE → browser</text>
+</svg>
+<div class="diagram-caption">চিত্র ৫: একটি event এর জন্ম থেকে browser পর্যন্ত পুরো যাত্রা</div>
+</div>
+
+<!-- ══ SECTION 8 ══════════════════════════════════════════════════════════ -->
+<h2 id="s8" class="page-break"><span class="num">৮</span> Detection Logic — কীভাবে "চোর" চেনা হয়?</h2>
+
+<!-- Diagram 6: Detection Flowchart -->
+<div class="diagram">
+<svg width="500" height="420" viewBox="0 0 500 420" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" font-size="12">
+  <defs>
+    <marker id="ad" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#8b949e"/></marker>
+    <marker id="adr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f85149"/></marker>
+    <marker id="adg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3fb950"/></marker>
+  </defs>
+
+  <!-- Start -->
+  <ellipse cx="250" cy="25" rx="80" ry="18" fill="#0d1f3c" stroke="#58a6ff" stroke-width="2"/>
+  <text x="250" y="30" fill="#58a6ff" font-weight="700" text-anchor="middle">openat syscall fires</text>
+
+  <line x1="250" y1="43" x2="250" y2="68" stroke="#8b949e" stroke-width="1.5" marker-end="url(#ad)"/>
+
+  <!-- Q1: Whitelist? -->
+  <polygon points="250,70 370,105 250,140 130,105" fill="#272115" stroke="#d29922" stroke-width="1.5"/>
+  <text x="250" y="101" fill="#d29922" font-weight="600" text-anchor="middle">Whitelist?</text>
+  <text x="250" y="116" fill="#8b949e" font-size="10" text-anchor="middle">(systemd, bash...)</text>
+
+  <!-- YES → skip -->
+  <line x1="370" y1="105" x2="440" y2="105" stroke="#3fb950" stroke-width="1.5" marker-end="url(#adg)"/>
+  <text x="405" y="99" fill="#3fb950" font-size="10" text-anchor="middle">YES</text>
+  <rect x="440" y="90" width="50" height="30" rx="5" fill="#0a1c10" stroke="#3fb950" stroke-width="1"/>
+  <text x="465" y="109" fill="#3fb950" font-size="11" text-anchor="middle">SKIP</text>
+
+  <!-- NO → down -->
+  <line x1="250" y1="140" x2="250" y2="165" stroke="#f85149" stroke-width="1.5" marker-end="url(#adr)"/>
+  <text x="262" y="156" fill="#f85149" font-size="10">NO</text>
+
+  <!-- Counter++ -->
+  <rect x="170" y="167" width="160" height="32" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+  <text x="250" y="187" fill="#adbac7" font-weight="600" text-anchor="middle">file_counts[pid] += 1</text>
+
+  <line x1="250" y1="199" x2="250" y2="224" stroke="#8b949e" stroke-width="1.5" marker-end="url(#ad)"/>
+
+  <!-- Q2: Sensitive? -->
+  <polygon points="250,226 380,258 250,290 120,258" fill="#1f0d0d" stroke="#f85149" stroke-width="1.5"/>
+  <text x="250" y="254" fill="#f85149" font-weight="600" text-anchor="middle">Sensitive path?</text>
+  <text x="250" y="270" fill="#8b949e" font-size="10" text-anchor="middle">/etc/passwd, /.ssh/ ...</text>
+
+  <!-- YES → ALERT -->
+  <line x1="380" y1="258" x2="445" y2="258" stroke="#f85149" stroke-width="2" marker-end="url(#adr)"/>
+  <text x="413" y="251" fill="#f85149" font-size="10" text-anchor="middle">YES</text>
+  <rect x="445" y="244" width="45" height="28" rx="5" fill="#1f0d0d" stroke="#f85149" stroke-width="1.5"/>
+  <text x="467" y="262" fill="#f85149" font-weight="700" font-size="11" text-anchor="middle">🚨</text>
+
+  <!-- NO → down -->
+  <line x1="250" y1="290" x2="250" y2="318" stroke="#8b949e" stroke-width="1.5" marker-end="url(#ad)"/>
+  <text x="262" y="308" fill="#8b949e" font-size="10">NO</text>
+
+  <!-- Q3: Rate? -->
+  <polygon points="250,320 390,352 250,384 110,352" fill="#272115" stroke="#d29922" stroke-width="1.5"/>
+  <text x="250" y="346" fill="#d29922" font-weight="600" text-anchor="middle">count &gt; 50/sec?</text>
+  <text x="250" y="362" fill="#8b949e" font-size="10" text-anchor="middle">Exfiltration check</text>
+
+  <!-- YES → ALERT -->
+  <line x1="390" y1="352" x2="445" y2="352" stroke="#f85149" stroke-width="2" marker-end="url(#adr)"/>
+  <text x="413" y="345" fill="#f85149" font-size="10" text-anchor="middle">YES</text>
+  <rect x="445" y="338" width="45" height="28" rx="5" fill="#1f0d0d" stroke="#f85149" stroke-width="1.5"/>
+  <text x="467" y="356" fill="#f85149" font-weight="700" font-size="11" text-anchor="middle">🚨</text>
+
+  <!-- NO → INFO -->
+  <line x1="250" y1="384" x2="250" y2="406" stroke="#3fb950" stroke-width="1.5" marker-end="url(#adg)"/>
+  <text x="262" y="400" fill="#3fb950" font-size="10">NO</text>
+  <rect x="200" y="406" width="100" height="12" rx="4" fill="#0a1c10" stroke="#3fb950" stroke-width="1"/>
+  <text x="250" y="416" fill="#3fb950" font-size="9" text-anchor="middle">INFO — log only</text>
+</svg>
+<div class="diagram-caption">চিত্র ৬: Detection Logic Flowchart</div>
+</div>
+
+<!-- ══ SECTION 9 ══════════════════════════════════════════════════════════ -->
+<h2 id="s9" class="page-break"><span class="num">৯</span> Tech Stack — প্রতিটি Technology কেন?</h2>
+
+<table>
+  <tr><th>Technology</th><th>কী</th><th>কেন বেছে নিলাম</th><th>Alternative</th></tr>
+  <tr>
+    <td><strong>eBPF / BCC</strong></td>
+    <td>Kernel-level programmability</td>
+    <td>Safest way to instrument kernel — no module needed</td>
+    <td>LKM (risky), strace (slow), ptrace (slow)</td>
+  </tr>
+  <tr>
+    <td><strong>Python + BCC</strong></td>
+    <td>User space framework</td>
+    <td>Fastest to prototype, BCC has Python bindings built-in</td>
+    <td>Go + libbpf (production-grade), Rust (safest)</td>
+  </tr>
+  <tr>
+    <td><strong>Flask</strong></td>
+    <td>Web framework</td>
+    <td>Lightweight, built-in dev server, easy SSE support</td>
+    <td>FastAPI (async), Django (heavy)</td>
+  </tr>
+  <tr>
+    <td><strong>Server-Sent Events</strong></td>
+    <td>Real-time push protocol</td>
+    <td>One-way push, HTTP-native, no extra library needed</td>
+    <td>WebSocket (bidirectional, more complex)</td>
+  </tr>
+  <tr>
+    <td><strong>Chart.js</strong></td>
+    <td>Frontend charting</td>
+    <td>Lightweight, responsive, beautiful defaults, no build step</td>
+    <td>D3.js (flexible, complex), Recharts (React only)</td>
+  </tr>
+  <tr>
+    <td><strong>Python threading</strong></td>
+    <td>Concurrency</td>
+    <td>BPF loop ও Flask কে parallel চালাতে হবে</td>
+    <td>asyncio (single thread, complex), multiprocessing</td>
+  </tr>
+  <tr>
+    <td><strong>Tracepoints</strong></td>
+    <td>Kernel hook mechanism</td>
+    <td>Stable ABI — kernel update এ break হয় না</td>
+    <td>kprobes (unstable ABI), uprobes (user-space only)</td>
+  </tr>
+</table>
+
+<!-- ══ SECTION 10 ══════════════════════════════════════════════════════════ -->
+<h2 id="s10" class="page-break"><span class="num">১০</span> Future Scope — আরও কী যোগ করা যায়?</h2>
+
+<div class="card-grid">
+  <div class="card">
+    <div class="card-icon">🤖</div>
+    <div class="card-title">ML-Based Anomaly Detection</div>
+    <div class="card-body">
+      Threshold এর বদলে <strong>Isolation Forest</strong> বা <strong>LSTM</strong> দিয়ে
+      process behavior শিখিয়ে আরও accurate detection।
+      scikit-learn দিয়ে সহজেই integrate করা যাবে।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🌐</div>
+    <div class="card-title">Network Traffic Monitoring</div>
+    <div class="card-body">
+      <strong>XDP hook</strong> যোগ করে দেখা যাবে কোন process কোন IP তে data পাঠাচ্ছে।
+      Data exfiltration over network detect করা যাবে।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🔪</div>
+    <div class="card-title">Auto Process Kill</div>
+    <div class="card-body">
+      ALERT হলে automatically সেই PID কে <code>SIGKILL</code> পাঠানো।
+      <code>os.kill(pid, signal.SIGKILL)</code> দিয়ে implement হবে।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">📦</div>
+    <div class="card-title">Container Monitoring</div>
+    <div class="card-body">
+      Docker container isolation bypass detection।
+      Container escape attacks (cgroups namespaces violation) detect করা।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🦀</div>
+    <div class="card-title">Rust + libbpf-rs</div>
+    <div class="card-body">
+      Python এর বদলে Rust দিয়ে user space লেখা।
+      Production-grade, memory-safe, faster।
+      Aya framework ব্যবহার করে পুরো eBPF-ও Rust এ লেখা যাবে।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">📧</div>
+    <div class="card-title">Alert Notification System</div>
+    <div class="card-body">
+      Email (smtplib), Telegram bot, Slack webhook দিয়ে
+      ALERT হলে phone এ notification পাঠানো।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🗄️</div>
+    <div class="card-title">Database Integration</div>
+    <div class="card-body">
+      SQLite বা InfluxDB তে events store করা।
+      Grafana দিয়ে historical analysis dashboard।
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-icon">🔐</div>
+    <div class="card-title">LSM Hook (Mandatory Access Control)</div>
+    <div class="card-body">
+      শুধু detect নয়, <strong>block</strong> করা। LSM BPF hook দিয়ে
+      unauthorized access কে return -EPERM দিয়ে deny করা।
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 11 ══════════════════════════════════════════════════════════ -->
+<h2 id="s11" class="page-break"><span class="num">১১</span> Exam / Viva Q&A</h2>
+
+<div class="callout callout-warn">
+  <strong>📚 এই প্রশ্নগুলো OS বা Security course এর viva তে আসতে পারে।</strong>
+</div>
+
+<table>
+  <tr><th>#</th><th>প্রশ্ন</th><th>উত্তর</th></tr>
+  <tr>
+    <td>1</td>
+    <td>eBPF কী এবং traditional kernel module থেকে কীভাবে আলাদা?</td>
+    <td>eBPF হলো kernel এর built-in VM যেখানে Verifier দ্বারা verified safe code চলে। Kernel module directly kernel code, একটা bug এ পুরো OS crash। eBPF তে crash সম্ভব না — worst case program load হয় না।</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Kernel Space ও User Space কী? কেন divide করা?</td>
+    <td>CPU এর hardware protection ring ব্যবহার করে memory ও privilege separate রাখা। User program ভুল করলে শুধু সে মরে, পুরো OS না। Security ও stability দুটোই নিশ্চিত হয়।</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>System Call কী? <code>openat</code> call হলে কী হয়?</td>
+    <td>User space থেকে kernel service নেওয়ার mechanism। CPU <code>syscall</code> instruction execute করে — mode switch হয় Ring 3 → Ring 0, kernel handler চলে, ফলাফল return হয়, আবার Ring 3 এ ফেরে।</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>eBPF Verifier কেন দরকার?</td>
+    <td>eBPF code kernel এ চলে। Verifier নিশ্চিত করে: (1) infinite loop নেই, (2) out-of-bounds memory access নেই, (3) null pointer dereference নেই। Safety guarantee ছাড়া kernel এ কোনো external code চালানো unsafe।</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>IPC কী? এই প্রজেক্টে কোন IPC ব্যবহার করা হয়েছে?</td>
+    <td>Inter-Process Communication। Kernel ও User space এর মধ্যে eBPF Maps (বিশেষত BPF_PERF_OUTPUT ring buffer) ব্যবহার করা হয়েছে — এটা shared memory based IPC।</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>Race condition কী? এই প্রজেক্টে কোথায় সমস্যা হতে পারে?</td>
+    <td>একাধিক thread বা CPU core একই data একসাথে modify করলে। <code>file_counts</code> dictionary multithreaded context এ race condition prone। eBPF map counter atomic, তাই kernel side safe। Python side এ lock যোগ করলে আরো robust হবে।</td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td>False Positive কী? এই detector এ কীভাবে কমানো যায়?</td>
+    <td>Legitimate process কে malicious বলে চিহ্নিত করা। Whitelist বাড়ানো, threshold টিউন করা, ML-based baseline শেখানো দিয়ে false positive কমানো যায়।</td>
+  </tr>
+  <tr>
+    <td>8</td>
+    <td>SSE ও WebSocket এর পার্থক্য কী?</td>
+    <td>SSE: one-way (server→client), HTTP এর উপর, automatic reconnect। WebSocket: bidirectional, আলাদা protocol, manual reconnect। আমাদের case এ browser শুধু receive করে তাই SSE যথেষ্ট।</td>
+  </tr>
+  <tr>
+    <td>9</td>
+    <td>JIT compilation eBPF performance এ কী ভূমিকা রাখে?</td>
+    <td>eBPF bytecode কে x86_64 native machine code এ convert করে — interpreted execution এর চেয়ে ১০-১০০x দ্রুত। Production system এ JIT always enabled।</td>
+  </tr>
+  <tr>
+    <td>10</td>
+    <td>এই প্রজেক্টের limitation কী?</td>
+    <td>(1) Root privilege দরকার। (2) eBPF 512 byte stack limit। (3) Threshold-based detection — sophisticated malware ধীরে ধীরে চুরি করলে ধরা যাবে না। (4) Python GIL performance bottleneck হতে পারে।</td>
+  </tr>
+</table>
+
+<hr/>
+
+<div class="callout callout-tip">
+  <strong>🎓 সারসংক্ষেপ:</strong>
+  এই প্রজেক্টে তুমি একসাথে শিখেছ — OS এর Kernel/User space, System Calls, Process management, IPC;
+  Security তে Threat modeling, Anomaly detection;
+  eBPF এর VM, Verifier, JIT, Maps;
+  Web তে Flask, SSE, Chart.js, threading।
+  এটা একটি real industry-grade architecture যা Netflix ও Google production এ ব্যবহার করে।
+</div>
+
+<div class="bottom-nav">
+  <p>BPF-Based Live Resource Thief Detector — OS Course Project</p>
+  <p style="margin-top:6px">Ubuntu 26.04 | Kernel 7.0 | Python 3.14 | eBPF / BCC</p>
+  <p style="margin-top:6px;font-size:11px">
+    PDF করতে: Browser → Print → Save as PDF → Paper: A4, Margins: Default
+  </p>
+</div>
+
+</div><!-- /content -->
+</div><!-- /layout -->
+
+</body>
+</html>

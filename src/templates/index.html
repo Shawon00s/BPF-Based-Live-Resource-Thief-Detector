@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BPF Resource Thief Detector</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --green:     #3fb950;
+      --yellow:    #d29922;
+      --red:       #f85149;
+      --red-dim:   #3d1c1c;
+      --yellow-dim:#2b2000;
+      --green-dim: #0d2818;
+      --blue-dim:  #0d1f3c;
+      --radius:    8px;
+      --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── Header ──────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #1f6feb, #58a6ff);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    h1 { font-size: 16px; font-weight: 600; }
+    h1 span { color: var(--muted); font-weight: 400; }
+
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px; font-weight: 500;
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      color: var(--green);
+    }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Stat Cards ──────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 4px;
+      transition: border-color .2s;
+    }
+    .stat-card:hover { border-color: var(--accent); }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .stat-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); }
+    .stat-card.alert  .stat-value { color: var(--red); }
+    .stat-card.warn   .stat-value { color: var(--yellow); }
+    .stat-card.total  .stat-value { color: var(--accent); }
+    .stat-card.active .stat-value { color: var(--green); }
+
+    /* ── Grid: Chart + Top Procs ─────────────────────────────── */
+    .mid-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 900px) { .mid-grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .card-title {
+      font-size: 13px; font-weight: 600;
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title .badge {
+      font-size: 10px; padding: 2px 7px;
+      border-radius: 10px;
+      background: var(--blue-dim);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+    }
+
+    .chart-wrap { position: relative; height: 220px; }
+
+    /* ── Top Processes ───────────────────────────────────────── */
+    .proc-list { display: flex; flex-direction: column; gap: 8px; }
+    .proc-row {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .proc-name {
+      font-family: var(--font-mono);
+      font-size: 12px; min-width: 110px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .proc-bar-wrap { flex: 1; background: #21262d; border-radius: 3px; height: 6px; }
+    .proc-bar { height: 6px; border-radius: 3px; background: var(--accent); transition: width .4s; }
+    .proc-count { font-size: 11px; color: var(--muted); min-width: 28px; text-align: right; }
+
+    /* ── Alert Banner ────────────────────────────────────────── */
+    #alert-banner {
+      display: none;
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--red);
+      display: flex; align-items: center; gap: 10px;
+    }
+    #alert-banner.hidden { display: none; }
+    #alert-banner .alert-icon { font-size: 18px; }
+    #alert-banner .alert-text { flex: 1; }
+    #alert-banner button {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 16px;
+    }
+
+    /* ── Event Log Table ─────────────────────────────────────── */
+    .log-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .filter-group { display: flex; gap: 6px; }
+    .filter-btn {
+      padding: 4px 10px; border-radius: 5px;
+      border: 1px solid var(--border);
+      background: transparent; color: var(--muted);
+      cursor: pointer; font-size: 12px; transition: .15s;
+    }
+    .filter-btn.active-all    { border-color: var(--accent);  color: var(--accent);  background: var(--blue-dim); }
+    .filter-btn.active-alert  { border-color: var(--red);     color: var(--red);     background: var(--red-dim); }
+    .filter-btn.active-warn   { border-color: var(--yellow);  color: var(--yellow);  background: var(--yellow-dim); }
+    .filter-btn.active-info   { border-color: var(--green);   color: var(--green);   background: var(--green-dim); }
+
+    .log-wrap {
+      height: 340px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .log-wrap::-webkit-scrollbar { width: 6px; }
+    .log-wrap::-webkit-scrollbar-track { background: var(--surface); }
+    .log-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      position: sticky; top: 0;
+      background: #1c2128;
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr {
+      border-bottom: 1px solid #21262d;
+      transition: background .1s;
+    }
+    tbody tr:hover { background: #1c2128; }
+    tbody td {
+      padding: 7px 12px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      max-width: 0;
+    }
+    td.wrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .badge-level {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; letter-spacing: .5px;
+    }
+    .badge-ALERT { background: var(--red-dim);    color: var(--red);    border: 1px solid var(--red); }
+    .badge-WARN  { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--yellow); }
+    .badge-INFO  { background: var(--green-dim);  color: var(--green);  border: 1px solid var(--green); }
+
+    .row-ALERT { background: rgba(248,81,73,.04); }
+    .row-WARN  { background: rgba(210,153,34,.04); }
+
+    /* ── Scrollbar auto-follow toggle ────────────────────────── */
+    .toggle-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--muted);
+    }
+    input[type=checkbox] { accent-color: var(--accent); }
+
+    /* ── Toast notifications ─────────────────────────────────── */
+    #toast-container {
+      position: fixed; bottom: 24px; right: 24px;
+      display: flex; flex-direction: column; gap: 8px;
+      z-index: 999;
+    }
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--red);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      font-size: 12px; max-width: 340px;
+      animation: slideIn .25s ease;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+    }
+    .toast .t-title { color: var(--red); font-weight: 600; margin-bottom: 2px; }
+    .toast .t-body  { color: var(--muted); font-family: var(--font-mono); }
+    @keyframes slideIn {
+      from { transform: translateX(110%); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="header-left">
+    <div class="logo">🛡️</div>
+    <div>
+      <h1>BPF Resource Thief Detector <span>/ Live Dashboard</span></h1>
+      <div style="font-size:11px;color:var(--muted)" id="kernel-info">Loading...</div>
+    </div>
+  </div>
+  <div class="status-pill" id="status-pill">
+    <div class="status-dot"></div>
+    <span id="status-text">Connecting...</span>
+  </div>
+</header>
+
+<!-- ── Alert Banner ── -->
+<div id="alert-banner" class="hidden">
+  <span class="alert-icon">⚠️</span>
+  <span class="alert-text" id="alert-text">Alert detected!</span>
+  <button onclick="document.getElementById('alert-banner').classList.add('hidden')">✕</button>
+</div>
+
+<main>
+
+  <!-- ── Stat Cards ── -->
+  <div class="stat-grid">
+    <div class="stat-card total">
+      <div class="stat-label">Total Events</div>
+      <div class="stat-value" id="s-total">0</div>
+    </div>
+    <div class="stat-card alert">
+      <div class="stat-label">🚨 Alerts</div>
+      <div class="stat-value" id="s-alerts">0</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">⚠️ Warnings</div>
+      <div class="stat-value" id="s-warns">0</div>
+    </div>
+    <div class="stat-card active">
+      <div class="stat-label">Events / sec</div>
+      <div class="stat-value" id="s-rate">0</div>
+    </div>
+  </div>
+
+  <!-- ── Chart + Top Procs ── -->
+  <div class="mid-grid">
+    <div class="card">
+      <div class="card-title">
+        📈 Live Event Timeline
+        <span class="badge">last 60 sec</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="timelineChart"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔥 Most Active Processes</div>
+      <div class="proc-list" id="proc-list">
+        <div style="color:var(--muted);font-size:12px">Waiting for data...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Event Log ── -->
+  <div class="card">
+    <div class="log-header">
+      <div class="card-title" style="margin:0">📋 Live Event Log</div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="toggle-row">
+          <input type="checkbox" id="auto-scroll" checked />
+          <label for="auto-scroll">Auto-scroll</label>
+        </div>
+        <div class="filter-group">
+          <button class="filter-btn active-all" onclick="setFilter('ALL',this)">All</button>
+          <button class="filter-btn" onclick="setFilter('ALERT',this)">Alert</button>
+          <button class="filter-btn" onclick="setFilter('WARN',this)">Warn</button>
+          <button class="filter-btn" onclick="setFilter('INFO',this)">Info</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-wrap" id="log-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:70px">Time</th>
+            <th style="width:60px">Level</th>
+            <th style="width:55px">PID</th>
+            <th style="width:130px">Process</th>
+            <th>Detail</th>
+            <th style="width:250px">File</th>
+          </tr>
+        </thead>
+        <tbody id="log-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Toast container ── -->
+<div id="toast-container"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let currentFilter = 'ALL';
+let eventCount = 0;
+let rateBuffer = [];   // timestamps for events/sec calculation
+
+// ── Chart setup ──────────────────────────────────────────────────────────────
+const MAX_POINTS = 30;
+const labels  = Array(MAX_POINTS).fill('');
+const alertData = Array(MAX_POINTS).fill(0);
+const warnData  = Array(MAX_POINTS).fill(0);
+const infoData  = Array(MAX_POINTS).fill(0);
+
+const ctx = document.getElementById('timelineChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [
+      {
+        label: 'Alerts', data: alertData,
+        borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,.15)',
+        tension: .3, fill: true, pointRadius: 0, borderWidth: 2,
+      },
+      {
+        label: 'Warnings', data: warnData,
+        borderColor: '#d29922', backgroundColor: 'rgba(210,153,34,.1)',
+        tension: .3, fill: true, pointRadius: 0, borderWidth: 2,
+      },
+      {
+        label: 'Info', data: infoData,
+        borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.07)',
+        tension: .3, fill: true, pointRadius: 0, borderWidth: 2,
+      },
+    ],
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 200 },
+    scales: {
+      x: { display: false },
+      y: {
+        beginAtZero: true, min: 0,
+        grid: { color: '#21262d' },
+        ticks: { color: '#8b949e', stepSize: 1 },
+      },
+    },
+    plugins: {
+      legend: {
+        labels: { color: '#8b949e', boxWidth: 12, font: { size: 11 } },
+      },
+    },
+  },
+});
+
+// tick buckets
+let bucket = { alerts: 0, warns: 0, infos: 0 };
+setInterval(() => {
+  labels.shift();  labels.push(new Date().toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+  alertData.shift(); alertData.push(bucket.alerts);
+  warnData.shift();  warnData.push(bucket.warns);
+  infoData.shift();  infoData.push(bucket.infos);
+  chart.update('none');
+  bucket = { alerts: 0, warns: 0, infos: 0 };
+}, 2000);
+
+// ── SSE Connection ────────────────────────────────────────────────────────────
+const evtSource = new EventSource('/stream');
+
+evtSource.onopen = () => {
+  document.getElementById('status-text').textContent = 'Live';
+};
+
+evtSource.onerror = () => {
+  document.getElementById('status-text').textContent = 'Reconnecting...';
+  document.getElementById('status-pill').style.borderColor = '#d29922';
+  document.getElementById('status-pill').style.color = '#d29922';
+};
+
+evtSource.onmessage = (e) => {
+  const ev = JSON.parse(e.data);
+  if (ev.type === 'connected') return;
+
+  addRow(ev);
+  updateBucket(ev.level);
+  trackRate();
+
+  if (ev.level === 'ALERT') {
+    showToast(ev);
+    showBanner(ev);
+  }
+};
+
+// ── Row rendering ─────────────────────────────────────────────────────────────
+function addRow(ev) {
+  if (currentFilter !== 'ALL' && ev.level !== currentFilter) return;
+
+  const tbody = document.getElementById('log-body');
+  const tr = document.createElement('tr');
+  tr.className = `row-${ev.level}`;
+
+  const fname = ev.filename || '';
+  tr.innerHTML = `
+    <td class="wrap" style="color:var(--muted)">${ev.ts}</td>
+    <td><span class="badge-level badge-${ev.level}">${ev.level}</span></td>
+    <td class="wrap" style="color:var(--muted)">${ev.pid}</td>
+    <td class="wrap" style="color:var(--accent)">${ev.comm}</td>
+    <td class="wrap">${ev.detail}</td>
+    <td class="wrap" style="color:var(--muted);font-size:11px" title="${fname}">${fname}</td>
+  `;
+
+  tbody.insertBefore(tr, tbody.firstChild);  // newest on top
+
+  // Keep DOM lean
+  while (tbody.children.length > 300) tbody.removeChild(tbody.lastChild);
+
+  if (document.getElementById('auto-scroll').checked) {
+    document.getElementById('log-wrap').scrollTop = 0;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function updateBucket(level) {
+  if (level === 'ALERT') bucket.alerts++;
+  else if (level === 'WARN') bucket.warns++;
+  else bucket.infos++;
+}
+
+function trackRate() {
+  const now = Date.now();
+  rateBuffer.push(now);
+  rateBuffer = rateBuffer.filter(t => now - t < 1000);
+  document.getElementById('s-rate').textContent = rateBuffer.length;
+}
+
+function showToast(ev) {
+  const c = document.getElementById('toast-container');
+  const d = document.createElement('div');
+  d.className = 'toast';
+  d.innerHTML = `<div class="t-title">🚨 ALERT — PID ${ev.pid}</div>
+                 <div class="t-body">${ev.comm}: ${ev.detail}</div>`;
+  c.appendChild(d);
+  setTimeout(() => d.remove(), 5000);
+}
+
+function showBanner(ev) {
+  const b = document.getElementById('alert-banner');
+  b.classList.remove('hidden');
+  document.getElementById('alert-text').textContent =
+    `[ALERT] PID ${ev.pid} (${ev.comm}): ${ev.detail}`;
+}
+
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.className = 'filter-btn';
+  });
+  btn.classList.add(`active-${f.toLowerCase()}`);
+}
+
+// ── Polling stats + top procs ─────────────────────────────────────────────────
+async function pollStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const s = await r.json();
+    document.getElementById('s-total').textContent  = s.total;
+    document.getElementById('s-alerts').textContent = s.alerts;
+    document.getElementById('s-warns').textContent  = s.warns;
+
+    const mode = s.is_root ? (s.bcc_available ? 'eBPF LIVE' : 'BCC Missing') : 'DEMO MODE';
+    document.getElementById('kernel-info').textContent =
+      `Kernel: ${navigator.userAgent.match(/Linux/)?'Linux':'?'} | Mode: ${mode}`;
+
+    // Top procs bar chart
+    const list = document.getElementById('proc-list');
+    if (!s.top_procs.length) return;
+    const max = s.top_procs[0][1] || 1;
+    list.innerHTML = s.top_procs.map(([name, count]) => `
+      <div class="proc-row">
+        <span class="proc-name">${name}</span>
+        <div class="proc-bar-wrap">
+          <div class="proc-bar" style="width:${Math.round(count/max*100)}%"></div>
+        </div>
+        <span class="proc-count">${count}</span>
+      </div>
+    `).join('');
+  } catch(e) { /* ignore */ }
+}
+
+setInterval(pollStats, 2000);
+pollStats();
+</script>
+</body>
+</html>
