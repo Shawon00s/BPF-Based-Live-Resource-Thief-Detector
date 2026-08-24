@@ -230,6 +230,20 @@
     .badge-WARN  { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--yellow); }
     .badge-INFO  { background: var(--green-dim);  color: var(--green);  border: 1px solid var(--green); }
 
+    /* ML score badge — colour = risk level */
+    .badge-ml {
+      display: inline-block;
+      padding: 1px 6px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; letter-spacing: .3px;
+      margin-left: 2px; white-space: nowrap;
+    }
+    /* below 50 % → green (normal) */
+    .badge-ml.low  { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+    /* 50–90 % → yellow (suspicious, below alert threshold) */
+    .badge-ml.mid  { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--yellow); }
+    /* 90 %+ → red (crosses the 0.9 alert threshold) */
+    .badge-ml.high { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+
     .row-ALERT { background: rgba(248,81,73,.04); }
     .row-WARN  { background: rgba(210,153,34,.04); }
 
@@ -296,12 +310,16 @@
       <div class="stat-value" id="s-total">0</div>
     </div>
     <div class="stat-card alert">
-      <div class="stat-label">🚨 Alerts</div>
+      <div class="stat-label">🚨 Rule Alerts</div>
       <div class="stat-value" id="s-alerts">0</div>
     </div>
     <div class="stat-card warn">
       <div class="stat-label">⚠️ Warnings</div>
       <div class="stat-value" id="s-warns">0</div>
+    </div>
+    <div class="stat-card" style="border-color:#7c3aed">
+      <div class="stat-label" style="color:#b57bee">🤖 ML Detections</div>
+      <div class="stat-value" id="s-ml" style="color:#b57bee">0</div>
     </div>
     <div class="stat-card active">
       <div class="stat-label">Events / sec</div>
@@ -354,9 +372,10 @@
             <th style="width:70px">Time</th>
             <th style="width:60px">Level</th>
             <th style="width:55px">PID</th>
-            <th style="width:130px">Process</th>
+            <th style="width:120px">Process</th>
             <th>Detail</th>
-            <th style="width:250px">File</th>
+            <th style="width:80px" title="LSTM anomaly score (0=normal, 1=attack)">🤖 ML</th>
+            <th style="width:230px">File / Info</th>
           </tr>
         </thead>
         <tbody id="log-body"></tbody>
@@ -471,12 +490,23 @@ function addRow(ev) {
   tr.className = `row-${ev.level}`;
 
   const fname = ev.filename || '';
+
+  // ML score badge — colour changes with risk level
+  let mlBadge = '<td style="color:var(--border);font-size:10px;text-align:center">—</td>';
+  if (ev.ml_score !== undefined && ev.ml_score !== null) {
+    const pct  = Math.round(ev.ml_score * 100);
+    const cls  = ev.ml_score >= 0.9 ? 'high' : ev.ml_score >= 0.5 ? 'mid' : 'low';
+    const tip  = `LSTM score: ${ev.ml_score.toFixed(4)}\n0=normal  1=attack\nAlert threshold: 0.90`;
+    mlBadge = `<td><span class="badge-ml ${cls}" title="${tip}">${pct}%</span></td>`;
+  }
+
   tr.innerHTML = `
     <td class="wrap" style="color:var(--muted)">${ev.ts}</td>
     <td><span class="badge-level badge-${ev.level}">${ev.level}</span></td>
     <td class="wrap" style="color:var(--muted)">${ev.pid}</td>
     <td class="wrap" style="color:var(--accent)">${ev.comm}</td>
     <td class="wrap">${ev.detail}</td>
+    ${mlBadge}
     <td class="wrap" style="color:var(--muted);font-size:11px" title="${fname}">${fname}</td>
   `;
 
@@ -537,10 +567,12 @@ async function pollStats() {
     document.getElementById('s-total').textContent  = s.total;
     document.getElementById('s-alerts').textContent = s.alerts;
     document.getElementById('s-warns').textContent  = s.warns;
+    document.getElementById('s-ml').textContent     = s.ml_detections || 0;
 
-    const mode = s.is_root ? (s.bcc_available ? 'eBPF LIVE' : 'BCC Missing') : 'DEMO MODE';
+    let mode = s.is_root ? (s.bcc_available ? 'eBPF LIVE' : 'BCC Missing') : 'DEMO MODE';
+    if (s.ml_available) mode += ' + LSTM';
     document.getElementById('kernel-info').textContent =
-      `Kernel: ${navigator.userAgent.match(/Linux/)?'Linux':'?'} | Mode: ${mode}`;
+      `Kernel: Linux | Mode: ${mode}`;
 
     // Top procs bar chart
     const list = document.getElementById('proc-list');

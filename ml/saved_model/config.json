@@ -1,0 +1,7 @@
+{
+  "max_syscall": 350,
+  "top_bigrams": 100,
+  "feature_size": 450,
+  "contamination": 0.05,
+  "threshold": -0.37334719929316934
+}

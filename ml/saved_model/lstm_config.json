@@ -1,0 +1,12 @@
+{
+  "seq_len": 200,
+  "max_syscall": 351,
+  "pad_token": 350,
+  "embed_dim": 64,
+  "hidden_dim": 128,
+  "num_layers": 2,
+  "threshold": 0.9,
+  "best_auc": 0.9854,
+  "min_display_syscalls": 50,
+  "note": "threshold raised 0.5->0.9: cuts false positives at equal detection"
+}

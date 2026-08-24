@@ -1,0 +1,202 @@
+BPF Resource Thief Detector — Session Report
+Generated : 2026-08-23 20:48:59.850662
+Events    : 197
+============================================================
+
+[ALERT] 20:48:13 | PID 58228 (ML-Engine) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:14 | PID 58235 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:14 | PID 58237 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:14 | PID 58237 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:14 | PID 58239 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:14 | PID 58240 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:14 | PID 58241 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:14 | PID 58242 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:14 | PID 58243 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:14 | PID 58244 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[ALERT] 20:48:14 | PID 7557 (ThreadPoolForeg) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:15 | PID 58278 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:15 | PID 58280 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[ALERT] 20:48:15 | PID 58279 (git) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:15 | PID 58282 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:15 | PID 58284 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:15 | PID 58289 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:15 | PID 58291 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:15 | PID 58291 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:15 | PID 58293 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:15 | PID 58295 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:15 | PID 58294 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:15 | PID 58296 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:15 | PID 58297 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:15 | PID 58298 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:15 | PID 58299 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:16 | PID 58302 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:16 | PID 58303 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:16 | PID 58305 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:16 | PID 58307 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:16 | PID 58309 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[ALERT] 20:48:17 | PID 3868 (pipewire-pulse) | Sensitive file accessed -> /etc/passwd
+[ALERT] 20:48:17 | PID 3868 (pipewire-pulse) | Sensitive file accessed -> /etc/passwd
+[ALERT] 20:48:17 | PID 1456 (polkitd) | Sensitive file accessed -> /etc/passwd
+[ALERT] 20:48:17 | PID 1456 (polkitd) | Sensitive file accessed -> /etc/passwd
+[ALERT] 20:48:17 | PID 1456 (polkitd) | Sensitive file accessed -> /etc/passwd
+[INFO] 20:48:20 | PID 58327 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:20 | PID 58329 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:20 | PID 58329 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:20 | PID 58332 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:20 | PID 58333 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:20 | PID 58331 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:20 | PID 58334 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:20 | PID 58335 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:20 | PID 58336 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:20 | PID 58337 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:21 | PID 58338 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:21 | PID 58339 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:21 | PID 58341 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:21 | PID 58343 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:21 | PID 58345 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:25 | PID 58348 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:25 | PID 58350 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:25 | PID 58350 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:25 | PID 58355 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:25 | PID 58353 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:25 | PID 58352 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:25 | PID 58354 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:25 | PID 58356 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:25 | PID 58357 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:25 | PID 58358 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:26 | PID 58365 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:26 | PID 58366 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:26 | PID 58368 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:26 | PID 58370 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:26 | PID 58372 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:26 | PID 58375 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:26 | PID 58377 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:26 | PID 58377 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:26 | PID 58379 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:26 | PID 58380 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:26 | PID 58381 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:26 | PID 58382 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:26 | PID 58383 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:27 | PID 58386 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:27 | PID 58387 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:30 | PID 58392 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:30 | PID 58394 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:30 | PID 58394 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:30 | PID 58397 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:30 | PID 58396 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:30 | PID 58398 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:30 | PID 58399 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:30 | PID 58400 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:30 | PID 58401 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:30 | PID 58402 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:31 | PID 58404 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:31 | PID 58406 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:31 | PID 58406 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:31 | PID 58410 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:31 | PID 58409 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:31 | PID 58408 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:31 | PID 58411 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:31 | PID 58412 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:31 | PID 58413 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:31 | PID 58415 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:31 | PID 58417 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:31 | PID 58419 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[ALERT] 20:48:31 | PID 7557 (MemoryInfra) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:32 | PID 58421 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:32 | PID 58422 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:35 | PID 58425 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:35 | PID 58427 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:35 | PID 58427 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:35 | PID 58429 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:35 | PID 58430 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:35 | PID 58431 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:35 | PID 58432 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:35 | PID 58433 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:35 | PID 58434 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:35 | PID 58435 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:36 | PID 58436 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:36 | PID 58437 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:36 | PID 58439 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:36 | PID 58441 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:36 | PID 58443 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[ALERT] 20:48:37 | PID 2516 (upowerd) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:40 | PID 58446 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:40 | PID 58448 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:40 | PID 58448 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:40 | PID 58450 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:40 | PID 58451 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:40 | PID 58453 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:40 | PID 58452 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:40 | PID 58454 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:40 | PID 58455 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:40 | PID 58456 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:41 | PID 58457 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:41 | PID 58458 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:41 | PID 58460 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:41 | PID 58462 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:41 | PID 58464 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:45 | PID 58476 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:45 | PID 58478 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:45 | PID 58478 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:45 | PID 58480 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:45 | PID 58481 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:45 | PID 58482 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:45 | PID 58483 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:45 | PID 58484 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:45 | PID 58485 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:45 | PID 58486 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:46 | PID 58487 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:46 | PID 58488 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:46 | PID 58490 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:46 | PID 58492 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:46 | PID 58494 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:50 | PID 58507 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:50 | PID 58509 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:50 | PID 58509 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:50 | PID 58512 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:50 | PID 58513 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:50 | PID 58511 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:50 | PID 58514 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:50 | PID 58515 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:50 | PID 58516 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:50 | PID 58517 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:51 | PID 58518 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:51 | PID 58519 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:51 | PID 58521 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:51 | PID 58523 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:51 | PID 58525 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:53 | PID 58532 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:53 | PID 58534 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:53 | PID 58534 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:53 | PID 58536 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:53 | PID 58537 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:53 | PID 58538 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:53 | PID 58539 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[ALERT] 20:48:53 | PID 24884 (libuv-worker) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:54 | PID 58540 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:54 | PID 58541 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:55 | PID 58544 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:55 | PID 58546 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:55 | PID 58546 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:55 | PID 58549 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:55 | PID 58551 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:55 | PID 58548 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:55 | PID 58550 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:55 | PID 58552 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:55 | PID 58553 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:55 | PID 58554 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:56 | PID 58555 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:56 | PID 58556 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:56 | PID 58558 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:56 | PID 58560 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:56 | PID 58562 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[ALERT] 20:48:56 | PID 24884 (libuv-worker) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:58 | PID 58565 (sh) | New process spawned -> /usr/bin/which
+[INFO] 20:48:58 | PID 58567 (sh) | New process spawned -> /usr/bin/ps
+[ALERT] 20:48:58 | PID 58567 (ps) | High-speed file access: 51/sec — possible exfiltration
+[INFO] 20:48:58 | PID 58569 (sh) | New process spawned -> /snap/code/258/usr/share/code/resources/app/out/vs/base/node/cpuUsage.sh
+[INFO] 20:48:58 | PID 58570 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:58 | PID 58571 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
+[INFO] 20:48:58 | PID 58572 (cpuUsage.sh) | New process spawned -> /usr/bin/sleep
+[INFO] 20:48:59 | PID 58573 (cpuUsage.sh) | New process spawned -> /usr/bin/sed
+[INFO] 20:48:59 | PID 58574 (cpuUsage.sh) | New process spawned -> /usr/bin/cat
