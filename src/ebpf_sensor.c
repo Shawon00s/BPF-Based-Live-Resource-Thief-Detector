@@ -46,10 +46,13 @@ struct proc_event_t {
     char filename[256];
 };
 
-// Compact event for EVERY syscall — fed into the LSTM sliding window
+// Compact event for sampled syscalls — fed into the LSTM sliding window.
+// comm is included so user space can name a process that has already exited
+// by the time it tries to read /proc/<pid>/comm.
 struct syscall_event_t {
-    u32 pid;
-    u32 syscall_nr;
+    u32  pid;
+    u32  syscall_nr;
+    char comm[TASK_COMM_LEN];
 };
 
 // ─── eBPF Maps ────────────────────────────────────────────────────────────────
@@ -60,6 +63,22 @@ BPF_PERF_OUTPUT(syscall_events);   // (pid, syscall_nr) → LSTM predictor
 
 // Per-PID openat counter — lets user space detect high-frequency file access
 BPF_HASH(read_count, u32, u64);
+
+// Per-PID syscall counter, used purely for burst sampling (see below)
+BPF_HASH(sc_seq, u32, u64);
+
+// ─── Burst sampling ───────────────────────────────────────────────────────────
+// Emitting one perf event per syscall means >100k events/sec system-wide, which
+// user-space Python cannot drain — the ring overflows and the kernel reports
+// "Possibly lost N samples", losing most of the stream anyway.
+//
+// The LSTM needs *consecutive* syscalls (a sequence), so we cannot simply keep
+// every Nth call — that would destroy the ordering it was trained on. Instead
+// we emit in bursts: BURST consecutive syscalls per PID, then stay silent for
+// the rest of the CYCLE. Each burst is a genuine uninterrupted run long enough
+// to fill the model's 100-syscall window, at a fraction of the event rate.
+#define SC_BURST  128    // emit this many consecutive syscalls...
+#define SC_CYCLE 1024    // ...out of every this many (=12.5% of traffic)
 
 // ─── Main Hook ────────────────────────────────────────────────────────────────
 //
@@ -85,13 +104,22 @@ RAW_TRACEPOINT_PROBE(sys_enter) {
     if (pid == SELF_PID)
         return 0;
 
-    // ── 1. LSTM feed: emit compact event for every user-space syscall ──────────
-    // Filter: pid > 1 skips the idle task; syscall_nr < 400 stays in ABI range.
+    // ── 1. LSTM feed: emit a sampled burst of consecutive syscalls ────────────
+    // pid > 1 skips the idle task; syscall_nr < 400 stays inside the ABI range.
     if (pid > 1 && syscall_nr >= 0 && syscall_nr < 400) {
-        struct syscall_event_t sc = {};
-        sc.pid        = pid;
-        sc.syscall_nr = (u32)syscall_nr;
-        syscall_events.perf_submit(ctx, &sc, sizeof(sc));
+        u64 zero = 0;
+        u64 *seq = sc_seq.lookup_or_try_init(&pid, &zero);
+        if (seq) {
+            u64 phase = (*seq) % SC_CYCLE;
+            (*seq)++;
+            if (phase < SC_BURST) {          // inside the emit window
+                struct syscall_event_t sc = {};
+                sc.pid        = pid;
+                sc.syscall_nr = (u32)syscall_nr;
+                bpf_get_current_comm(&sc.comm, sizeof(sc.comm));
+                syscall_events.perf_submit(ctx, &sc, sizeof(sc));
+            }
+        }
     }
 
     // ── 2. Detailed events: only for openat and execve ─────────────────────────

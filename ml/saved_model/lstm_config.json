@@ -6,7 +6,7 @@
   "hidden_dim": 128,
   "num_layers": 2,
   "threshold": 0.9,
-  "best_auc": 0.9854,
   "min_display_syscalls": 50,
-  "note": "threshold raised 0.5->0.9: cuts false positives at equal detection"
+  "best_auc": 0.9834,
+  "note": "threshold 0.9 (not 0.5): fewer false positives on live traffic"
 }

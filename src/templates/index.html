@@ -168,6 +168,38 @@
       cursor: pointer; font-size: 16px;
     }
 
+
+    /* ── ML Engine panel ─────────────────────────────────────── */
+    .ml-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 8px 14px;
+    }
+    .ml-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .ml-name {
+      font-family: var(--font-mono); min-width: 96px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--accent);
+    }
+    .ml-pid { color: var(--muted); font-size: 10px; }
+    /* window-fill bar: how close this PID is to a scoreable window */
+    .ml-bar-wrap {
+      flex: 1; height: 6px; background: #21262d;
+      border-radius: 3px; position: relative; overflow: hidden;
+    }
+    .ml-bar { height: 6px; border-radius: 3px; transition: width .4s; }
+    .ml-bar.filling { background: #30363d; }   /* below 50 — not scoreable */
+    .ml-bar.partial { background: #7c3aed; }   /* 50-99 — display only */
+    .ml-bar.full    { background: #58a6ff; }   /* 100 — alert-grade */
+    .ml-score {
+      min-width: 44px; text-align: right;
+      font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+    }
+    .ml-score.low  { color: var(--green); }
+    .ml-score.mid  { color: var(--yellow); }
+    .ml-score.high { color: var(--red); }
+    .ml-score.none { color: #30363d; }
+
     /* ── Event Log Table ─────────────────────────────────────── */
     .log-header {
       display: flex; align-items: center; justify-content: space-between;
@@ -343,6 +375,22 @@
       <div class="card-title">🔥 Most Active Processes</div>
       <div class="proc-list" id="proc-list">
         <div style="color:var(--muted);font-size:12px">Waiting for data...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ML Engine (live model activity) ── -->
+  <div class="card" id="ml-card" style="margin-bottom:20px;border-color:#7c3aed">
+    <div class="card-title" style="justify-content:space-between">
+      <span>🤖 LSTM Engine <span class="badge" id="ml-device">—</span></span>
+      <span style="font-size:11px;color:var(--muted);font-weight:400" id="ml-summary">
+        waiting for syscalls…
+      </span>
+    </div>
+    <div class="ml-grid" id="ml-list">
+      <div style="color:var(--muted);font-size:12px;grid-column:1/-1">
+        No processes buffered yet. The model needs 50 syscalls from a process
+        before it can score it, and 100 before it can raise an alert.
       </div>
     </div>
   </div>
@@ -592,6 +640,75 @@ async function pollStats() {
 
 setInterval(pollStats, 2000);
 pollStats();
+
+// ── ML Engine panel ───────────────────────────────────────────────────────────
+// The event-log badge only appears when a PID opens a file. This panel polls
+// the predictor's internal state directly, so you can watch windows fill and
+// scores appear even on a quiet system.
+async function pollML() {
+  try {
+    const r = await fetch('/api/ml');
+    const m = await r.json();
+    const card = document.getElementById('ml-card');
+
+    if (!m.available) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+    document.getElementById('ml-device').textContent = m.device.toUpperCase();
+
+    const sum = document.getElementById('ml-summary');
+    if (m.calibrating) {
+      // Suppressing alerts while we learn what this machine's normal looks like
+      sum.innerHTML = `<span style="color:#d29922">⏳ calibrating — ${m.cal_left}s left, ` +
+                      `${m.cal_samples.toLocaleString()} windows sampled · alerts paused</span>`;
+    } else {
+      const mean = m.mean_score !== null ? ` · mean ${(m.mean_score*100).toFixed(0)}%` : '';
+      const lost = m.lost ? ` · <span style="color:#d29922">${m.lost.toLocaleString()} dropped</span>` : '';
+      sum.innerHTML =
+        `${m.tracked} tracked · ${m.ready} full window${m.ready===1?'':'s'} · ` +
+        `${m.inferences.toLocaleString()} inferences${mean} · ` +
+        `alert ≥ ${(m.threshold*100).toFixed(1)}%${lost}`;
+    }
+
+    const list = document.getElementById('ml-list');
+    if (!m.top.length) {
+      list.innerHTML = '<div style="color:var(--muted);font-size:12px;grid-column:1/-1">' +
+        'No processes buffered yet.</div>';
+      return;
+    }
+
+    list.innerHTML = m.top.map(t => {
+      // bar colour marks what the window is good for, not how full it looks
+      const barCls = t.filled >= m.window ? 'full'
+                   : t.filled >= m.min_display ? 'partial' : 'filling';
+      let scoreTxt = '—', scoreCls = 'none';
+      if (t.score !== null && t.score !== undefined) {
+        scoreTxt = Math.round(t.score * 100) + '%';
+        scoreCls = t.score >= m.threshold ? 'high' : t.score >= 0.5 ? 'mid' : 'low';
+      }
+      const tip = `${t.comm} (PID ${t.pid})\n${t.filled}/${m.window} syscalls buffered\n` +
+                  (t.score !== null && t.score !== undefined
+                     ? `LSTM score ${t.score.toFixed(4)}` : 'needs ' + m.min_display + ' to score') +
+                  (t.muted ? '\nWhitelisted — scored but cannot alert' : '');
+      // Whitelisted rows are dimmed: still scored and visible, but they can
+      // never raise an alert, so they should not draw the eye.
+      return `<div class="ml-row" title="${tip}" style="${t.muted ? 'opacity:.45' : ''}">
+                <span class="ml-name">${t.comm === '?' || t.comm === 'unknown' ? '<span style="color:var(--muted)">exited</span>' : t.comm} <span class="ml-pid">${t.pid}</span></span>
+                <span class="ml-bar-wrap">
+                  <span class="ml-bar ${barCls}" style="width:${t.percent}%"></span>
+                </span>
+                <span class="ml-score ${scoreCls}">${scoreTxt}</span>
+              </div>`;
+    }).join('');
+  } catch (e) { /* dashboard still starting */ }
+}
+
+setInterval(pollML, 1500);
+pollML();
+
+
 </script>
 </body>
 </html>

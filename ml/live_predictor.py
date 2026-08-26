@@ -50,6 +50,7 @@ class LivePredictor:
 
     WINDOW_SIZE = 100          # syscalls needed for a full, alert-grade window
     MIN_DISPLAY_SYSCALLS = 50  # minimum before showing a (low-confidence) score
+    INFERENCE_STRIDE = 50      # re-score only after this many new syscalls
     ALERT_SCORE = None         # loaded from lstm_config.json at startup
 
     def __init__(self):
@@ -58,6 +59,8 @@ class LivePredictor:
         # pid -> deque of recent syscall numbers (sliding window, i686-normalised)
         self.buffers = defaultdict(lambda: deque(maxlen=self.WINDOW_SIZE))
         self.scores  = {}   # pid -> latest anomaly probability
+        self.inference_count = 0   # how many LSTM forward passes we have run
+        self.seen = {}             # pid -> total syscalls ever seen (for striding)
         print("[ML] LivePredictor initialized ✓")
 
     def _load_syscall_map(self):
@@ -152,11 +155,22 @@ class LivePredictor:
 
         # Translate x86_64 syscall number -> i686 (what the model was trained on)
         self.buffers[pid].append(self.translate(syscall_nr))
+        self.seen[pid] = self.seen.get(pid, 0) + 1
 
-        # Run inference once the window is full
-        if len(self.buffers[pid]) >= self.WINDOW_SIZE:
-            return self._predict(pid)
-        return None
+        n = len(self.buffers[pid])
+        if n < self.WINDOW_SIZE:
+            return None
+
+        # The buffer is a deque(maxlen=WINDOW_SIZE), so once it fills it STAYS
+        # full.  Predicting on every call from then on would run one GPU
+        # inference per syscall — thousands per second on a live system, and it
+        # re-raises the same alert for a process that simply stays busy.
+        # Instead advance in strides: score once per INFERENCE_STRIDE new
+        # syscalls, i.e. when the window has meaningfully changed.
+        if (self.seen[pid] - self.WINDOW_SIZE) % self.INFERENCE_STRIDE != 0:
+            return None
+
+        return self._predict(pid)
 
     def partial_score(self, pid: int, min_syscalls: int = None):
         """
@@ -212,6 +226,7 @@ class LivePredictor:
 
         is_anom = prob >= self.ALERT_SCORE
         self.scores[pid] = prob
+        self.inference_count += 1
         return {
             "score":      round(prob, 4),   # 0.0 = normal, 1.0 = attack
             "is_anomaly": is_anom,

@@ -41,11 +41,14 @@ if _ml_dir not in sys.path:
 
 ML_AVAILABLE = False
 predictor    = None
+DEVICE_NAME  = "n/a"
 try:
     from live_predictor import LivePredictor
     predictor    = LivePredictor()
     ML_AVAILABLE = predictor.ready
     if ML_AVAILABLE:
+        from live_predictor import DEVICE as _dev
+        DEVICE_NAME = _dev.type          # "cuda" or "cpu", shown in the UI
         print("[ML] LSTM model loaded — real-time anomaly scoring enabled ✓")
     else:
         print("[ML] Model files not found. Run: python3 ml/lstm_train.py")
@@ -73,12 +76,38 @@ SENSITIVE_PATHS = [
 ]
 FILE_RATE_THRESHOLD = 50      # file opens / second per PID → alert
 WINDOW_SECONDS      = 1
+
+# Paths under these prefixes are kernel interfaces, not user data. Daemons poll
+# them thousands of times a second by design — nvidia-powerd reads
+# /dev/cpu/N/msr for power management, systemd-oomd walks /sys/fs/cgroup — and
+# counting those as "file opens" makes the exfiltration rule fire constantly.
+# Reading them is not data theft, so they are excluded from the rate counter.
+# They are still logged, and still checked against SENSITIVE_PATHS.
+NOISE_PATH_PREFIXES = (
+    "/proc/", "/sys/", "/dev/cpu/", "/dev/shm/", "/run/",
+    "/dev/null", "/dev/urandom", "/dev/random", "/dev/pts/",
+)
 WHITELIST = {
-    "systemd", "bash", "python3", "sshd", "cron",
-    "apt", "dpkg", "snap", "snapd", "code", "code-tunnel",
-    "flask", "gunicorn",
-    "ThreadPoolSingl", "gmain", "pool-",   # VS Code / IDE threads
-    "electron", "node", "typescript",
+    # shells & package tooling
+    "systemd", "bash", "sh", "python3", "sshd", "cron",
+    "apt", "dpkg", "snap", "snapd", "flask", "gunicorn",
+    # editors / IDE threads
+    "code", "code-tunnel", "electron", "node", "typescript",
+    "ThreadPoolSingl", "ThreadPoolForeg", "ThreadPoolBack", "gmain", "pool-",
+    # browsers — extremely chatty, and absent from 2011 training data.
+    # Chromium spawns many named worker threads; comm is capped at 15 chars,
+    # so these are the truncated forms the kernel actually reports.
+    "chrome", "chromium", "firefox", "google-chrome-s", "google-chrome",
+    "Chrome_ChildIOT", "Chrome_IOThread", "Compositor", "CompositorTileW",
+    "GpuMemoryThread", "MemoryInfra", "NetworkService", "HangWatcher",
+    "ThreadPoolServi", "VizCompositorTh", "Media", "AudioThread",
+    # language servers / build tooling
+    "cpptools", "cpptools-srv", "rust-analyzer", "gopls", "pylance",
+    # desktop services
+    "dbus-daemon", "NetworkManager", "gnome-shell", "Xorg", "Xwayland",
+    "pipewire", "wireplumber", "gvfsd", "packagekitd", "upowerd", "colord",
+    # hardware/telemetry daemons that poll kernel interfaces in tight loops
+    "nvidia-powerd", "nvidia-persist", "irqbalance", "thermald", "systemd-oomd",
 }
 
 # ── Shared state ──────────────────────────────────────────────────────────────
@@ -86,10 +115,25 @@ event_queue   = queue.Queue(maxsize=500)    # BPF/demo thread → SSE /stream
 recent_events = []                          # last 200 events for /api/events
 pid_comms     = {}                          # pid → latest comm name (for ML alerts)
 ml_last_alert = {}                          # pid → last ML alert timestamp
+ml_anomalous  = set()                       # pids currently in the anomalous state
+
+# ── ML auto-calibration ───────────────────────────────────────────────────────
+# The LSTM was trained on ADFA-LD (Ubuntu 11.04, 2011). Modern desktop software
+# — Chrome, VS Code, systemd — makes syscall sequences that look nothing like
+# that era's "normal", so almost everything scores >0.9 and the log floods.
+#
+# Rather than hard-coding a threshold that suits one machine, spend the first
+# CALIBRATION_SECONDS learning what THIS machine's normal looks like, then set
+# the bar just above it. Alerts stay suppressed while calibrating.
+ML_CALIBRATION_SECONDS = 90
+ML_CALIBRATION_PCTL    = 99.5   # alert above this percentile of local normal
+ml_cal_scores  = []             # scores observed during calibration
+ml_cal_started = None           # set when the first syscall arrives
+ml_cal_done    = False
 
 # Once a full window scores anomalous, the next 100 syscalls will very likely
 # score the same way — this cooldown stops one process flooding the log.
-ML_ALERT_COOLDOWN = 10   # seconds between ML alerts for the same PID
+ML_ALERT_COOLDOWN = 60   # seconds before the same PID may alert again
 
 stats = {
     "total":         0,
@@ -169,6 +213,45 @@ def get_ml_score(pid: int):
     return score
 
 
+# Perf-ring overflow accounting. The kernel drops events when user space
+# cannot keep up; without tracking it, the only sign is "Possibly lost N
+# samples" on the console and the UI silently shows an incomplete picture.
+lost_samples = 0
+_lost_last_report = 0.0
+
+def handle_lost_samples(lost):
+    """Called by BCC when the syscall perf ring overflows."""
+    global lost_samples, _lost_last_report
+    lost_samples += lost
+    now = time.time()
+    if now - _lost_last_report >= 30:      # summarise, never per-drop
+        _lost_last_report = now
+        push_event("WARN", 0, "system",
+                   f"Perf ring overflow — {lost_samples:,} syscall samples dropped "
+                   f"so far; ML sees a sampled subset")
+
+
+def resolve_comm(pid: int) -> str:
+    """
+    Best-effort process name for a PID.
+
+    pid_comms is only filled by file/proc events, so a process that never opens
+    a file shows as "unknown" in ML alerts. Fall back to /proc/<pid>/comm, which
+    the kernel keeps for every live process, and cache the result.
+    """
+    comm = pid_comms.get(pid)
+    if comm:
+        return comm
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            comm = f.read().strip()
+    except (OSError, ValueError):
+        comm = "unknown"
+    if comm and comm != "unknown":
+        pid_comms[pid] = comm      # cache; PIDs are reused rarely enough
+    return comm or "unknown"
+
+
 # ── eBPF event handlers ───────────────────────────────────────────────────────
 
 def handle_file_event(cpu, data, size):
@@ -192,7 +275,9 @@ def handle_file_event(cpu, data, size):
         last_reset = now
         alerted_pids.clear()
 
-    file_counts[pid] += 1
+    # Only real filesystem reads count toward the exfiltration rate
+    if not fname.startswith(NOISE_PATH_PREFIXES):
+        file_counts[pid] += 1
 
     # Attach the latest LSTM score for this PID to every event (None until
     # the 100-syscall window fills; then shows real score even if normal)
@@ -250,28 +335,121 @@ def handle_syscall_event(cpu, data, size):
     pid        = event.pid
     syscall_nr = event.syscall_nr
 
+    # The kernel captured comm at syscall time, so short-lived processes are
+    # named correctly even though /proc/<pid> is already gone by now.
+    if pid not in pid_comms:
+        try:
+            pid_comms[pid] = event.comm.decode("utf-8", errors="replace").strip()
+        except Exception:
+            pass
+
     result = predictor.add_syscall(pid, syscall_nr)
+    if result is None:
+        return
 
-    # Alert ONLY on a full 100-syscall window.
-    # Partial windows are display-only — they are ~78% false positives at 15
-    # syscalls because heavy PAD_TOKEN padding reads as anomalous to the model.
-    if result and result["is_anomaly"]:
-        # Rate-limit: one ML alert per PID per ML_ALERT_COOLDOWN seconds
+    # ── Calibration phase: learn this machine's normal, do not alert ──────────
+    global ml_cal_started, ml_cal_done
+    if not ml_cal_done:
         now = time.time()
-        if now - ml_last_alert.get(pid, 0) < ML_ALERT_COOLDOWN:
-            return
-        ml_last_alert[pid] = now
+        if ml_cal_started is None:
+            ml_cal_started = now
+            push_event("INFO", 0, "system",
+                       f"ML calibrating for {ML_CALIBRATION_SECONDS}s — "
+                       f"learning this machine's normal syscall behaviour")
+        ml_cal_scores.append(result["score"])
 
-        comm = pid_comms.get(pid, "unknown")
-        push_event(
-            "ALERT", pid, comm,
-            f"🤖 LSTM anomaly — score {result['score']:.0%}",
-            filename=f"ML full-window (score={result['score']:.4f}, threshold={predictor.ALERT_SCORE:.2f})",
-            ml_score=result["score"],
-        )
+        if now - ml_cal_started >= ML_CALIBRATION_SECONDS and len(ml_cal_scores) >= 50:
+            import statistics
+            learned = statistics.quantiles(ml_cal_scores, n=1000)[int(ML_CALIBRATION_PCTL * 10) - 1]
+            # Never drop below the notebook-derived floor. The ceiling is very
+            # close to 1.0 because on a modern desktop most windows already
+            # score ~0.99 — a 0.999 cap would leave the log still flooded.
+            # Push a quarter of the remaining distance toward 1.0. The
+            # predictor alerts on score >= threshold, so sitting exactly at the
+            # observed percentile would still fire on ordinary traffic.
+            learned = learned + (1.0 - learned) * 0.25
+            new_thr = min(0.99999, max(predictor.ALERT_SCORE, round(learned, 6)))
+            old_thr = predictor.ALERT_SCORE
+            predictor.ALERT_SCORE = new_thr
+            ml_cal_done = True
+            push_event("INFO", 0, "system",
+                       f"ML calibrated on {len(ml_cal_scores):,} windows — "
+                       f"threshold {old_thr:.2f} -> {new_thr:.4f} "
+                       f"(p{ML_CALIBRATION_PCTL} of local normal)")
+        return   # no alerts while calibrating
+
+    if not result["is_anomaly"]:
+        # Score dropped back below threshold — arm the PID to alert again if it
+        # later turns anomalous, so we report transitions rather than duration.
+        ml_anomalous.discard(pid)
+        return
+
+    # ── This PID's latest full window scored above threshold ─────────────────
+
+    comm = resolve_comm(pid)
+
+    # Same whitelist the rule engine uses. Without this, systemd/chrome/VS Code
+    # generate ML alerts constantly — they are busy, not malicious.
+    if comm in WHITELIST:
+        return
+
+    # Report the TRANSITION into anomalous, not every window while it stays
+    # that way. A process under sustained attack-like load would otherwise
+    # re-alert every stride forever.
+    if pid in ml_anomalous:
+        return
+
+    now = time.time()
+    if now - ml_last_alert.get(pid, 0) < ML_ALERT_COOLDOWN:
+        return
+
+    ml_anomalous.add(pid)
+    ml_last_alert[pid] = now
+
+    push_event(
+        "ALERT", pid, comm,
+        f"🤖 LSTM anomaly — score {result['score']:.0%}",
+        filename=f"ML full-window (score={result['score']:.4f}, threshold={predictor.ALERT_SCORE:.2f})",
+        ml_score=result["score"],
+    )
 
 
 # ── Demo Mode ─────────────────────────────────────────────────────────────────
+
+def _load_demo_attack_traces(limit=12):
+    """
+    Load real ADFA-LD attack traces and convert them to x86_64 numbering.
+
+    Demo mode used to invent syscall patterns, but hand-made loops do not
+    resemble the exploit sequences the LSTM was trained on, so it never fired
+    and the ML panel looked broken. Replaying genuine attack traces makes the
+    demo actually exercise the model.
+
+    Returns [] if the dataset is absent — demo mode then falls back to
+    synthetic bursts.
+    """
+    root = "/home/sudipto-roy-s-hawon/Downloads/ADFA-LD/Attack_Data_Master"
+    if not (ML_AVAILABLE and predictor and os.path.isdir(root)):
+        return []
+
+    # predictor.syscall_map is x86_64 -> i686; invert it to go the other way
+    inv = {}
+    for x64, i686 in predictor.syscall_map.items():
+        inv.setdefault(i686, x64)
+
+    import glob as _glob
+    traces = []
+    for f in sorted(_glob.glob(os.path.join(root, "*", "*.txt")))[:limit]:
+        try:
+            nums = [int(x) for x in open(f).read().split() if x.isdigit()]
+        except OSError:
+            continue
+        if len(nums) >= 100:
+            traces.append([inv.get(n, n) for n in nums[:400]])   # -> x86_64
+    if traces:
+        print(f"[ML] Demo mode: loaded {len(traces)} real ADFA-LD attack traces")
+    return traces
+
 
 def _run_demo_mode(reason: str = "BCC not available or not root"):
     """
@@ -279,28 +457,63 @@ def _run_demo_mode(reason: str = "BCC not available or not root"):
     The UI is fully functional in this mode; ML scoring still works.
     """
     import random, itertools
-    procs  = ["nginx", "curl", "python3", "bash", "malware_sim", "data_stealer"]
+
+    # A PID keeps one name for its whole life, so bind comm to pid rather than
+    # picking randomly each iteration — otherwise the ML panel shows an attack
+    # trace running under the name "bash".
+    DEMO_PROCS = {
+        1000: "nginx",   1001: "curl",         1002: "python3",
+        1003: "bash",    1004: "malware_sim",  1005: "data_stealer",
+    }
+    MALICIOUS = {"malware_sim", "data_stealer"}
+
     levels = ["INFO", "INFO", "INFO", "WARN", "ALERT"]
     files  = ["/etc/passwd", "/tmp/data.txt", "/home/user/doc.pdf",
               "/.ssh/id_rsa", "/var/log/syslog", "/etc/shadow"]
+
+    _demo_attacks = _load_demo_attack_traces()
 
     push_event("INFO", 0, "system", f"DEMO mode — {reason}")
 
     for i in itertools.count(1):
         time.sleep(random.uniform(0.3, 1.2))
-        level = random.choice(levels)
-        comm  = random.choice(procs)
-        fname = random.choice(files)
-        push_event(level, 1000 + i % 50, comm,
+        fake_pid = 1000 + (i % len(DEMO_PROCS))
+        comm     = DEMO_PROCS[fake_pid]
+        fname    = random.choice(files)
+        level    = ("ALERT" if comm in MALICIOUS and random.random() < 0.3
+                    else random.choice(levels))
+        push_event(level, fake_pid, comm,
                    "Sensitive file accessed" if level == "ALERT" else "File opened",
                    fname)
 
-        # Feed synthetic syscall numbers directly into LSTM (synchronous)
+        # Feed syscalls into the LSTM synchronously — the same path the eBPF
+        # handler uses, so demo mode exercises the real code.
         if ML_AVAILABLE and predictor:
-            fake_pid = 1000 + i % 50
             pid_comms[fake_pid] = comm
-            for sc in [257, 1, 3, 5, random.randint(0, 300)]:
-                predictor.add_syscall(fake_pid, sc)
+
+            if comm in MALICIOUS:
+                # replay a real ADFA-LD attack trace so the LSTM actually fires
+                if _demo_attacks:
+                    tr = _demo_attacks[i % len(_demo_attacks)]
+                    off = (i * 24) % max(1, len(tr) - 24)
+                    burst = tr[off:off + 24]
+                else:
+                    burst = [257, 0, 257, 0, 257, 0, 44, 1] * 3
+            else:
+                # ordinary program: varied open/read/write/close/mmap
+                burst = [257, 0, 1, 3, 9, 5, 21, 262,
+                         random.randint(0, 300)] * 3
+
+            for sc in burst:
+                result = predictor.add_syscall(fake_pid, sc)
+                if result and result["is_anomaly"]:
+                    now = time.time()
+                    if now - ml_last_alert.get(fake_pid, 0) >= ML_ALERT_COOLDOWN:
+                        ml_last_alert[fake_pid] = now
+                        push_event("ALERT", fake_pid, comm,
+                                   f"🤖 LSTM anomaly — score {result['score']:.0%}",
+                                   filename=f"ML full-window (demo, score={result['score']:.4f})",
+                                   ml_score=result["score"])
 
 
 # ── BPF Monitoring Thread ─────────────────────────────────────────────────────
@@ -332,10 +545,19 @@ def bpf_thread():
         return
 
     try:
-        bpf_instance["file_events"].open_perf_buffer(handle_file_event)
-        bpf_instance["proc_events"].open_perf_buffer(handle_proc_event)
+        # file_events sees every openat() system-wide — on a busy desktop that
+        # is tens of thousands per second. The BCC default is an 8-page ring
+        # with a lost handler that prints "Possibly lost N samples" straight to
+        # stderr, which is what floods the console. Give it a real buffer and
+        # route drops through our own counter instead.
+        bpf_instance["file_events"].open_perf_buffer(
+            handle_file_event, page_cnt=256, lost_cb=handle_lost_samples)
+        bpf_instance["proc_events"].open_perf_buffer(
+            handle_proc_event, page_cnt=64, lost_cb=handle_lost_samples)
         bpf_instance["syscall_events"].open_perf_buffer(
-            handle_syscall_event, page_cnt=256   # larger ring for high-volume syscall stream
+            handle_syscall_event,
+            page_cnt=512,             # 2 MB ring — syscalls are the busiest stream
+            lost_cb=handle_lost_samples,
         )
     except Exception as attach_err:
         short = str(attach_err).splitlines()[0][:120]
@@ -404,6 +626,62 @@ def api_stats():
             "is_root":       os.geteuid() == 0,
         })
 
+
+
+@app.route("/api/ml")
+def api_ml():
+    """
+    Live view of what the LSTM is doing right now.
+
+    The event-log badge only appears when a PID both reaches 50 syscalls AND
+    opens a file, so on a quiet desktop the model looks idle even when it is
+    working. This endpoint exposes the predictor's internal state directly:
+    which PIDs are buffered, how full each window is, and their latest scores.
+    """
+    if not ML_AVAILABLE or predictor is None:
+        return jsonify({"available": False})
+
+    window   = predictor.WINDOW_SIZE
+    min_disp = predictor.MIN_DISPLAY_SYSCALLS
+
+    tracked = []
+    # copy first — the BPF thread mutates these while we read
+    for pid, buf in list(predictor.buffers.items()):
+        n = len(buf)
+        comm = pid_comms.get(pid, "?")
+        tracked.append({
+            "pid":     pid,
+            "comm":    comm,
+            "filled":  n,
+            "percent": min(100, round(100 * n / window)),
+            "score":   predictor.scores.get(pid),
+            "scored":  n >= min_disp,
+            "muted":   comm in WHITELIST,   # can never alert — shown, ranked last
+        })
+
+    # Whitelisted processes are suppressed from alerting, so showing them first
+    # would fill the panel with rows that can never matter. Rank real candidates
+    # above them, then by score, then by how full the window is.
+    tracked.sort(key=lambda t: (t["muted"], -(t["score"] or 0), -t["filled"]))
+
+    scored = [t for t in tracked if t["score"] is not None]
+    return jsonify({
+        "available":   True,
+        "window":      window,
+        "min_display": min_disp,
+        "threshold":   predictor.ALERT_SCORE,
+        "device":      str(DEVICE_NAME),
+        "inferences":  predictor.inference_count,
+        "calibrating": (not ml_cal_done) and BCC_AVAILABLE and os.geteuid() == 0,
+        "cal_samples": len(ml_cal_scores),
+        "lost":        lost_samples,
+        "cal_left":    max(0, round(ML_CALIBRATION_SECONDS -
+                                    (time.time() - ml_cal_started))) if ml_cal_started else ML_CALIBRATION_SECONDS,
+        "tracked":     len(tracked),
+        "ready":       sum(1 for t in tracked if t["filled"] >= window),
+        "mean_score":  round(sum(t["score"] for t in scored) / len(scored), 4) if scored else None,
+        "top":         tracked[:12],
+    })
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":

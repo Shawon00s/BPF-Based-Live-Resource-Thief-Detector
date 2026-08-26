@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Runtime output
+logs/
+reports/
+
+# Dataset (large, download separately)
+ADFA-LD/
+
+# Keep trained models — they are the project deliverable:
+# ml/saved_model/  is intentionally NOT ignored
+
+# Report sources and build output (kept out of the repo on purpose)
+Untracked/
+
+# LaTeX build leftovers, in case the report is ever built elsewhere
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
