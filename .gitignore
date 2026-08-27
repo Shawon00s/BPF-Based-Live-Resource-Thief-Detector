@@ -28,3 +28,6 @@ Untracked/
 *.synctex.gz
 *.fls
 *.fdb_latexmk
+
+# Claude Code local settings
+.claude/

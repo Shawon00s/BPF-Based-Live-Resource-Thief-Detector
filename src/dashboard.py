@@ -263,11 +263,23 @@ def handle_file_event(cpu, data, size):
     comm  = event.comm.decode("utf-8", errors="replace").strip()
     fname = event.filename.decode("utf-8", errors="replace").strip()
 
-    if comm in WHITELIST or not fname:
+    if not fname:
         return
 
     # Track comm name so ML thread can label its alerts
     pid_comms[pid] = comm
+
+    # The whitelist exists to silence processes that are merely BUSY, so it is
+    # applied to the rate rule only. Touching a sensitive path is a different
+    # kind of signal and must never be suppressed: if anything at all reads
+    # /etc/shadow we want to hear about it, whitelisted or not.
+    if is_sensitive(fname):
+        push_event("ALERT", pid, comm, "Sensitive file accessed", fname,
+                   ml_score=get_ml_score(pid))
+        return
+
+    if comm in WHITELIST:
+        return
 
     now = time.time()
     if now - last_reset >= WINDOW_SECONDS:
@@ -283,10 +295,7 @@ def handle_file_event(cpu, data, size):
     # the 100-syscall window fills; then shows real score even if normal)
     ml_score = get_ml_score(pid)
 
-    if is_sensitive(fname):
-        push_event("ALERT", pid, comm, "Sensitive file accessed", fname,
-                   ml_score=ml_score)
-    elif file_counts[pid] > FILE_RATE_THRESHOLD and pid not in alerted_pids:
+    if file_counts[pid] > FILE_RATE_THRESHOLD and pid not in alerted_pids:
         alerted_pids.add(pid)
         push_event("ALERT", pid, comm,
                    f"High-speed file access: {file_counts[pid]}/sec — possible exfiltration",
