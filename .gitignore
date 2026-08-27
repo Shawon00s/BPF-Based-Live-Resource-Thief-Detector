@@ -20,6 +20,8 @@ ADFA-LD/
 # Report sources and build output (kept out of the repo on purpose)
 Untracked/
 
+reports/
+
 # LaTeX build leftovers, in case the report is ever built elsewhere
 *.aux
 *.log
