@@ -2,72 +2,94 @@
 
 **Operating Systems Course Project** · Ubuntu 26.04 · Kernel 7.0 · RTX 3050
 
-A live monitor that watches **every system call** on the machine and flags any
-process behaving like it is stealing data: reading private keys, sweeping the
-filesystem, or spawning suspicious children.
-
-The core idea is an operating systems idea. A program can hide its name, its
-window and its file on disk, but it cannot avoid asking the kernel for what it
-needs. The system call boundary is the one place where a process has to tell
-the truth about what it is doing.
+A tool that watches every system call on your computer and warns you when a
+program starts acting like it is stealing your files.
 
 ---
 
-## Operating systems concepts demonstrated
+## Demo video
 
-This table is the quickest way to see what the project covers and where.
+[![Watch the demo](https://img.youtube.com/vi/PEDQ-geG7GE/maxresdefault.jpg)](https://youtu.be/PEDQ-geG7GE)
 
-| OS concept | Where it lives | What it does |
-|---|---|---|
-| **System calls** | [src/ebpf_sensor.c](src/ebpf_sensor.c) | Intercepts `sys_enter` for every syscall; names `openat` (257) and `execve` (59) |
-| **Kernel space vs user space** | [src/ebpf_sensor.c](src/ebpf_sensor.c) + [src/dashboard.py](src/dashboard.py) | C runs in the kernel, Python in user space, joined by perf ring buffers |
-| **Calling conventions** | `ebpf_sensor.c` line 132 | Reads arguments from RDI and RSI registers directly |
-| **Kernel to user IPC** | `BPF_PERF_OUTPUT` × 3 | Three lock free ring buffers carry events out of the kernel |
-| **Kernel data structures** | `BPF_HASH` × 2 | Per process counters kept in kernel hash maps |
-| **Threads** | [src/detector.py](src/detector.py) lines 457 to 461 | Five threads, one job each |
-| **Producer and consumer** | `detector.py` lines 54 to 56 | Three bounded `queue.Queue` objects between stages |
-| **Mutual exclusion** | `detector.py` line 59 | One `threading.Lock` guards all shared counters |
-| **Thread coordination** | `detector.py` lines 67, 422 | `threading.Event` for shutdown, `wait(timeout)` instead of `sleep` |
-| **Buffering and backpressure** | `ebpf_sensor.c` lines 80 to 81 | Burst sampling stops the ring buffer overflowing |
-| **Process identity** | `struct file_event_t` | PID, UID and `comm` captured in kernel at syscall time |
+*Click the image to watch the project demonstration on YouTube.*
 
 ---
 
-## Running it
+## The idea
+
+A program cannot do anything useful on its own. To read a file, it must ask
+the kernel. That request is called a **system call**.
+
+This is useful for security. A program can change its name and pretend to be
+harmless, but it cannot avoid asking the kernel. If it wants to steal your
+password file, it has to call `openat` on that file. So if we watch the system
+calls, we see what a program is really doing.
+
+---
+
+## What it catches
+
+| Behaviour | Example |
+|---|---|
+| Reading secret files | Opening `/etc/shadow` or your SSH keys |
+| Sweeping the disk | Opening 500 files in one second |
+| Starting suspicious programs | Launching `ncat` or `socat` |
+| Odd patterns of calls | Attacks the rules were not written for |
+
+The first three are caught by rules. The last one is caught by a neural
+network trained on a public dataset of real Linux attacks.
+
+---
+
+## Operating systems concepts used
+
+Useful if you are marking this project.
+
+| Concept | Where to look |
+|---|---|
+| System calls | [ebpf_sensor.c](src/ebpf_sensor.c), hooks `sys_enter` |
+| Kernel space and user space | C code in the kernel, Python outside it |
+| CPU calling convention | Reads arguments from the RDI and RSI registers |
+| Kernel to user communication | Three perf ring buffers |
+| Kernel data structures | Two `BPF_HASH` maps for per process counters |
+| Threads | [detector.py](src/detector.py) lines 457 to 461 |
+| Producer and consumer | Three bounded queues, lines 54 to 56 |
+| Locks | One `threading.Lock`, line 59 |
+| Thread coordination | `threading.Event` for clean shutdown |
+| Buffering and overflow | Burst sampling in the kernel |
+
+---
+
+## How to run it
 
 ```bash
 cd ~/Downloads/Project
-bash run.sh                 # needs root, eBPF loads into the kernel
+bash run.sh
 ```
 
-Then open **http://localhost:5000**
+Then open **http://localhost:5000** in a browser.
 
-Expected on startup:
+It needs your password because reading system calls requires root.
 
-```
-[ML] LSTM loaded on cuda | AUC=0.9834
-[ML] Syscall ABI map loaded: 376 x86_64 to i686 translations
-[ML] LSTM model loaded — real-time anomaly scoring enabled
-```
+**The first 90 seconds are learning time.** The tool watches your machine
+quietly to find out what normal looks like here. It will not raise ML alerts
+during this period. This is on purpose and explained further down.
 
-The first **90 seconds are calibration**, during which no ML alerts fire. This
-is deliberate and explained below.
-
-**Trigger a detection** in a second terminal:
+**To test it**, open a second terminal and pretend to be an attacker:
 
 ```bash
 venv/bin/python3 src/simulate_thief.py snoop    # reads /etc/passwd
-venv/bin/python3 src/simulate_thief.py rapid    # opens 100 files fast
+venv/bin/python3 src/simulate_thief.py rapid    # opens 100 files quickly
 ```
 
-**Terminal only version**, no web interface, five threads visible in the log:
+**Terminal only version** if you want to see the five threads working:
 
 ```bash
 sudo venv/bin/python3 src/detector.py
 ```
 
-**Without root**, the tool falls back to demo mode and replays real attack
-traces from the dataset. Useful for showing the model fire on demand:
+**No password?** Run it without `sudo` and it switches to demo mode, replaying
+real attacks from the dataset so you can still see the model work:
 
 ```bash
 venv/bin/python3 src/dashboard.py
@@ -75,280 +97,169 @@ venv/bin/python3 src/dashboard.py
 
 ---
 
-## How a system call becomes an alert
+## How it works
 
-```
-  a process calls openat("/etc/shadow")
-            |
-  ==========|=================================  kernel space
-            v
-  RAW_TRACEPOINT_PROBE(sys_enter)        our eBPF program
-            |
-            +--> file_events      ring buffer   (openat details)
-            +--> proc_events      ring buffer   (execve details)
-            +--> syscall_events   ring buffer   (numbers for the model)
-            |
-  ==========|=================================  user space
-            v
-      perf_buffer_poll()
-            |
-            +--> rule engine   sensitive paths, open rate
-            +--> LSTM          sliding window of 100 syscalls
-                        |
-                        v
-                   alert on the dashboard
-```
+![How a system call becomes an alert](assets/how-it-works.png)
 
-### Why `RAW_TRACEPOINT_PROBE` and not `TRACEPOINT_PROBE`
+A small program is loaded into the Linux kernel using eBPF. The kernel checks
+it first so it cannot crash anything, then runs it every time any program makes
+a system call.
 
-The usual helper hands you a struct with named fields, so you can write
-`args->filename`. On kernel 7.0 that struct is incomplete and the build fails.
+Two system calls matter most:
 
-The raw variant gives no named fields at all, only a pointer to the CPU
-registers as they were at syscall entry. The x86 64 convention puts the first
-argument in **RDI** and the second in **RSI**, so:
+- **`openat`** tells us which file was opened
+- **`execve`** tells us a new program was started
 
-| syscall | argument wanted | register |
-|---|---|---|
-| `openat(dfd, filename, ...)` | 2nd | RSI |
-| `execve(filename, argv, envp)` | 1st | RDI |
+The kernel writes these events into ring buffers. Our Python program reads them
+out and decides what to do.
 
-This depends only on the processor convention, which does not change between
-kernel versions, so the same code works from kernel 4.18 to 7.x.
+### A problem we hit
+
+The normal way to read the file name from a system call did not compile on
+kernel 7.0. So instead we read it straight from the CPU registers. On a 64 bit
+machine the first argument sits in the RDI register and the second in RSI. This
+works on every kernel version because the CPU rule never changes.
 
 ---
 
-## Concurrency design
+## Why we needed threads
 
-The first version was a single loop: read a record, check it, print it, repeat.
-It failed, and the failure is the interesting part.
+![The five thread design](assets/threads.png)
 
-Printing to a terminal is slow. While the program was printing, **nobody was
-draining the kernel ring buffer**, so the kernel filled it and discarded
-records. Being slow did not make the answers late. It made them wrong, because
-the data was gone before it was ever read.
+The first version was one simple loop. Read an event, check it, print it,
+repeat. It did not work, and the reason is a good lesson.
 
-```
-Thread 1          Thread 2          Thread 3
-BPF Poller  --->  Rule Engine  --->  ML Engine
-            raw_queue      ml_queue
-   |                |                  |
-   |                +---------+--------+
-   |                          v
-   |                    alert_queue
-   |                     |        |
-   |                     v        v
-   |               Thread 4    Thread 5
-   |               Printer     Reporter
-   |
- never blocked by anything downstream
-```
+Printing to a screen is slow. While the program was printing, nobody was
+reading the kernel buffer. The buffer filled up and the kernel threw events
+away.
 
-| Thread | Job | Why it is separate |
-|---|---|---|
-| 1 BPF Poller | Drains the kernel ring buffer | Must never wait on anything |
-| 2 Rule Engine | Path and rate checks | CPU work, keep off the poller |
-| 3 ML Engine | LSTM inference on the GPU | Slowest stage by far |
-| 4 Alert Printer | Terminal output | Terminal I/O is slow |
-| 5 Report Writer | Saves a report every 60 s | Disk I/O is slow |
+**Being slow did not make the answers late. It made them wrong**, because the
+data was already gone.
 
-Three decisions matter, and each is a standard OS idea:
+So the program was split into five threads:
 
-**Bounded queues.** Every queue has a maximum size (2000, 500, 1000). When a
-consumer falls behind, the producer drops the oldest item rather than blocking.
-Losing one stale record is far cheaper than stalling the thread that reads the
-kernel, because a stalled reader loses thousands.
-
-**One lock, not several.** A single `state_lock` protects every shared counter
-and set. Using one lock instead of a lock per structure keeps the code simple
-and makes deadlock impossible, since a thread never holds one lock while
-waiting for another.
-
-**Event flag instead of sleep.** The report writer wakes every 60 seconds. With
-`time.sleep(60)` a Control C would take up to a minute to take effect. Instead
-it calls `shutdown_event.wait(timeout=60)`, so setting the event wakes every
-thread at once and the tool exits immediately after writing its final report.
-
----
-
-## Buffering: why the sensor samples in bursts
-
-Tracing every syscall system wide produces **over 100,000 perf events per
-second**. User space Python cannot drain that, so the ring overflowed and the
-kernel reported `Possibly lost N samples`, sometimes 45,000 at a time. The data
-was being thrown away regardless.
-
-Keeping every Nth call would be worse. The model reads **consecutive**
-sequences, and a decimated stream destroys the ordering it depends on.
-
-So the kernel program emits in bursts: **128 consecutive syscalls per process,
-then silence for the next 896**. Each burst is an unbroken run long enough to
-fill the model's 100 call window, at 12.5 percent of the event rate.
-
-All three ring buffers are also given an explicit size and a shared lost sample
-handler. BCC's default is an 8 page ring whose built in handler prints straight
-to stderr, which was the source of most of the console noise.
-
----
-
-## Detection layers
-
-### Layer 1: rules
-
-| Rule | Threshold |
+| Thread | Job |
 |---|---|
-| Sensitive path touched | `/etc/shadow`, `/.ssh/`, `.pem`, `id_rsa`, and similar |
-| File open rate | more than 50 per second per process |
-| Suspicious child process | `ncat`, `socat`, `curl`, and similar via `execve` |
+| 1 | Read the kernel buffer, nothing else |
+| 2 | Check the rules |
+| 3 | Run the model on the GPU |
+| 4 | Print alerts |
+| 5 | Save a report every minute |
 
-Two refinements came out of testing:
+Three choices made this work:
 
-**Sensitive paths are checked before the whitelist.** The whitelist exists to
-silence processes that are merely *busy*. Reading `/etc/shadow` is a different
-kind of signal and is never suppressed, whitelisted or not.
+**Queues have a size limit.** If a slow thread falls behind, we throw away the
+oldest event instead of waiting. Losing one old event is much better than
+freezing the thread that reads the kernel.
 
-**Kernel pseudo filesystems do not count toward the rate rule.** `nvidia-powerd`
-reads `/dev/cpu/N/msr` continuously for power management and `systemd-oomd`
-walks `/sys/fs/cgroup`. Both trip a naive rate rule instantly. Paths under
-`/proc`, `/sys` and `/dev/cpu` are kernel interfaces, not user data.
+**One lock for everything shared.** Using a single lock instead of many keeps
+the code simple and makes deadlock impossible.
 
-### Layer 2: the model
-
-An LSTM with attention, trained on **ADFA LD**, a public dataset of Linux
-syscall traces containing normal behaviour and six attack families.
-
-```
-100 syscall numbers -> Embedding(351,64) -> LSTM(64,128) x2
-                    -> Attention -> Linear(128,64,1) -> score 0.0 to 1.0
-```
-
-262,402 parameters, about 1 MB, roughly 150 MB of VRAM while training, about
-three minutes on the RTX 3050. Validation AUC **0.9834**.
-
-Reading the sequence *in order* is the point. A simpler Isolation Forest
-baseline only counted how often each call appeared, so it could not tell a
-program that opens one file from one that opens five hundred.
+**A flag instead of sleep.** The report thread waits on an event flag, not
+`sleep`. So pressing Control C stops everything at once instead of taking a
+full minute.
 
 ---
 
-## The syscall ABI problem
+## Too much data
 
-The single most important detail in the project, and the hardest bug.
+Watching every system call produces **more than 100,000 events per second**.
+Python cannot read that fast, so the kernel buffer overflowed and most events
+were lost.
 
-ADFA LD was recorded in 2011 on **32 bit Ubuntu**, so its traces use **i686**
-syscall numbers. Our sensor runs on **x86 64**. The same operations are
-numbered differently:
+We could not simply keep every tenth event, because the model needs calls that
+come one after another. Skipping breaks the order it learned.
 
-| operation | x86 64 | i686 |
-|---|---|---|
-| `read` | 0 | 3 |
-| `write` | 1 | 4 |
-| `openat` | 257 | 5 (`open`) |
-| `execve` | 59 | 11 |
-
-Untranslated, the model read `read` as `restart_syscall` and `openat` as
-`remap_file_pages`, patterns it had never trained on. Nothing crashed, because
-the numbers were valid on both sides. The scores were simply meaningless.
-
-[ml/syscall_map.json](ml/syscall_map.json) maps the two interfaces **by syscall
-name**, 376 entries. Measured effect on the gap between normal and attack
-scores:
-
-```
-without translation   +0.16
-with translation      +0.77
-```
-
-Full derivation in [ml/01_explore_dataset.ipynb](ml/01_explore_dataset.ipynb).
+So the kernel now sends **128 events in a row, then stays quiet for 896**. Each
+burst is a real unbroken sequence, long enough for the model, but only one
+eighth of the traffic. After this change, zero events were lost.
 
 ---
 
-## Tuning constants, and why each one is what it is
+## A bug worth knowing about
 
-| Setting | Value | Reason |
-|---|---|---|
-| Window to alert | 100 syscalls | at 15 the buffer is mostly padding and 78 percent of normal traffic is flagged |
-| Window to display | 50 syscalls | below this the score misleads |
-| Inference stride | 50 syscalls | the buffer is a fixed size deque; without a stride it rescores on *every* call |
-| Alert threshold | 0.9, then calibrated | see below |
-| Alert cooldown | 60 s per PID | a busy process should not re alert while it stays anomalous |
-| Burst sampling | 128 of every 1024 | one event per syscall overflows the perf ring |
-| File rate | 50 per second | above normal application behaviour |
+![Same operation, different number](assets/syscall-numbers.png)
 
-### Why the threshold calibrates itself
+The model was trained on a dataset recorded in 2011 on a 32 bit computer. Our
+sensor runs on a 64 bit computer. Both use numbers to identify system calls,
+but **they use different numbers for the same thing**.
 
-The model learned what normal looked like in 2011. Modern software does not
-behave that way: Chrome and VS Code run enormous `epoll` and `futex` loops that
-the training set never contained. Almost everything scored above 0.9.
+On our machine `read` is 0. In the dataset `read` is 3. So every event reached
+the model meaning something completely different.
 
-Raising a fixed threshold does not help when normal traffic already sits at
-0.99. So the detector spends its first 90 seconds scoring without alerting,
-collects the distribution on the machine it is actually running on, and sets
-the bar just above the 99.5th percentile of that. Normal traffic raising an
-alert fell from **87 percent to 3**.
+Nothing crashed, because both numbers were valid. The scores were just
+nonsense. We fixed it with a translation table of 376 entries that matches the
+two systems by name.
 
-This is a genuine limitation of using a 2011 dataset against a 2026 desktop,
-not something tuning can fully fix.
+| | Score gap between normal and attack |
+|---|---|
+| Before the fix | 0.16 |
+| After the fix | 0.77 |
+
+---
+
+## Why it learns your machine first
+
+The model knows what normal looked like in 2011. Modern software behaves very
+differently, so at first almost everything looked like an attack.
+
+Raising the alert level by hand does not help when normal activity already
+scores 99 percent. So the tool spends its first 90 seconds watching quietly,
+learning what is normal **on your machine**, and then sets the alert level just
+above that.
+
+False alarms dropped from **87 percent to 3 percent**.
 
 ---
 
 ## Results
 
-| Measured | Before | After |
+| What we measured | Before | After |
 |---|---|---|
-| Records lost per second by the kernel buffer | 45,646 | 0 |
-| Model runs per 1000 syscalls, one process | 901 | 19 |
-| Gap between normal and attack scores | 0.16 | 0.77 |
-| Normal traffic raising a false alert | 87 percent | 3 percent |
-| Attacks correctly detected | 93 percent | 93 percent |
+| Events lost per second | 45,646 | 0 |
+| Model runs per 1000 calls | 901 | 19 |
+| Score gap, normal vs attack | 0.16 | 0.77 |
+| False alarms | 87% | 3% |
+| Attacks caught | 93% | 93% |
 
-The last row is the one that matters. Every change that reduced noise was
-checked against detection, and detection held.
+The last row matters most. Everything we did to reduce noise was checked
+against detection, and detection stayed the same.
 
 ---
 
-## Project layout
+## Files
 
 ```
 Project/
 ├── src/
-│   ├── ebpf_sensor.c        kernel program, RAW_TRACEPOINT on sys_enter
-│   ├── dashboard.py         web version, Flask and server sent events
-│   ├── detector.py          terminal version, the five thread pipeline
-│   ├── simulate_thief.py    attack simulator for testing
-│   └── templates/index.html live interface
+│   ├── ebpf_sensor.c        the program that runs inside the kernel
+│   ├── dashboard.py         web version with the live interface
+│   ├── detector.py          terminal version, five threads
+│   └── simulate_thief.py    fake attacker for testing
 ├── ml/
-│   ├── 01_explore_dataset.ipynb    dataset and the ABI discovery
-│   ├── 02_isolation_forest.ipynb   unsupervised baseline
-│   ├── 03_lstm_train.ipynb         GPU sequence model
-│   ├── 04_live_inference.ipynb     validation and threshold tuning
-│   ├── live_predictor.py           the live scorer dashboard.py imports
-│   ├── syscall_map.json            376 x86 64 to i686 translations
-│   └── saved_model/                trained weights
-├── reports/                 auto saved session reports
-└── run.sh                   launcher, handles sudo and PYTHONPATH
+│   ├── 01 to 04 notebooks   dataset, training, and testing
+│   ├── live_predictor.py    scores processes while running
+│   └── saved_model/         the trained model
+└── run.sh                   starts everything
 ```
 
-The five thread pipeline lives in `detector.py`. `dashboard.py` uses a simpler
-threading model because Flask handles request concurrency itself.
+The five threads are in `detector.py`. The web version uses fewer threads
+because Flask handles that part itself.
 
-Notebooks are documented separately in [ml/README.md](ml/README.md).
+Notebooks are explained in [ml/README.md](ml/README.md).
 
 ---
 
-## Setup notes
+## Notes on setup
 
-**`run.sh` sets `PYTHONPATH` on purpose.** eBPF needs root, but `sudo` resets
-`$HOME` to `/root`, and Python derives its per user `site-packages` from
-`$HOME`. Anything installed with `pip install --user`, including `torch`,
-becomes invisible to root and the model silently fails to load.
+**Why `run.sh` sets `PYTHONPATH`.** Running with `sudo` changes your home
+folder to `/root`. Python then cannot find packages you installed for your own
+user, including PyTorch, and the model silently fails to load.
 
-**The sensor skips its own PID.** Reading the perf buffer issues syscalls. If
-those were traced they would generate more events, which take more syscalls to
-read, a feedback loop that saturates the ring. `SELF_PID` is substituted into
-the C source at load time.
+**The sensor ignores itself.** Reading the kernel buffer needs system calls. If
+we watched those too, we would create an endless loop that fills the buffer, so
+the sensor skips its own process.
 
-**Requirements:** BCC (`python3-bpfcc`), Flask, PyTorch with CUDA,
-scikit-learn, joblib. Dataset:
-[ADFA LD](https://research.unsw.edu.au/projects/adfa-ids-datasets) at
-`~/Downloads/ADFA-LD`.
+**You need:** BCC (`python3-bpfcc`), Flask, PyTorch with CUDA, scikit-learn,
+joblib, and the
+[ADFA LD dataset](https://research.unsw.edu.au/projects/adfa-ids-datasets).
