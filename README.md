@@ -1,8 +1,6 @@
 # BPF Based Live Resource Thief Detector
 
-<img src="assets/badges/ubuntu.png" height="28" alt="Ubuntu 26.04">
-<img src="assets/badges/kernel.png" height="28" alt="Kernel 7.0">
-<img src="assets/badges/gpu.png" height="28" alt="RTX 3050 CUDA">
+<p><img src="assets/badges/ubuntu.png" height="28" alt="Ubuntu 26.04">&nbsp;<img src="assets/badges/kernel.png" height="28" alt="Kernel 7.0">&nbsp;<img src="assets/badges/gpu.png" height="28" alt="RTX 3050 CUDA"></p>
 
 A tool that watches every system call on your computer and warns you when a
 program starts acting like it is stealing your files.
