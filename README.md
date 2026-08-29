@@ -1,17 +1,19 @@
 # BPF Based Live Resource Thief Detector
 
-**Operating Systems Course Project** · Ubuntu 26.04 · Kernel 7.0 · RTX 3050
+<img src="assets/badges/ubuntu.png" height="28" alt="Ubuntu 26.04">
+<img src="assets/badges/kernel.png" height="28" alt="Kernel 7.0">
+<img src="assets/badges/gpu.png" height="28" alt="RTX 3050 CUDA">
 
 A tool that watches every system call on your computer and warns you when a
 program starts acting like it is stealing your files.
 
 ---
 
-## Demo video
+## Video Demonstration
 
 [![Watch the demo](https://img.youtube.com/vi/PEDQ-geG7GE/maxresdefault.jpg)](https://youtu.be/PEDQ-geG7GE)
 
-*Click the image to watch the project demonstration on YouTube.*
+*Please Click the image to watch the project demonstration on YouTube.*
 
 ---
 
@@ -31,7 +33,7 @@ calls, we see what a program is really doing.
 
 | Behaviour | Example |
 |---|---|
-| Reading secret files | Opening `/etc/shadow` or your SSH keys |
+| Reading secret files | Opening `/etc/shadow` or SSH keys |
 | Sweeping the disk | Opening 500 files in one second |
 | Starting suspicious programs | Launching `ncat` or `socat` |
 | Odd patterns of calls | Attacks the rules were not written for |
@@ -41,9 +43,8 @@ network trained on a public dataset of real Linux attacks.
 
 ---
 
-## Operating systems concepts used
+## Operating systems concepts that I used
 
-Useful if you are marking this project.
 
 | Concept | Where to look |
 |---|---|
@@ -71,7 +72,7 @@ Then open **http://localhost:5000** in a browser.
 
 It needs your password because reading system calls requires root.
 
-**The first 90 seconds are learning time.** The tool watches your machine
+**The first 90 seconds are learning(calibration) time.** The tool watches machine
 quietly to find out what normal looks like here. It will not raise ML alerts
 during this period. This is on purpose and explained further down.
 
@@ -110,19 +111,19 @@ Two system calls matter most:
 - **`openat`** tells us which file was opened
 - **`execve`** tells us a new program was started
 
-The kernel writes these events into ring buffers. Our Python program reads them
+The kernel writes these events into ring buffers. The Python program reads them
 out and decides what to do.
 
-### A problem we hit
+### A problem that I hit
 
 The normal way to read the file name from a system call did not compile on
-kernel 7.0. So instead we read it straight from the CPU registers. On a 64 bit
+kernel 7.0. So instead I read it straight from the CPU registers. On a 64 bit
 machine the first argument sits in the RDI register and the second in RSI. This
 works on every kernel version because the CPU rule never changes.
 
 ---
 
-## Why we needed threads
+## Why Threads are needed
 
 ![The five thread design](assets/threads.png)
 
@@ -184,7 +185,7 @@ The model was trained on a dataset recorded in 2011 on a 32 bit computer. Our
 sensor runs on a 64 bit computer. Both use numbers to identify system calls,
 but **they use different numbers for the same thing**.
 
-On our machine `read` is 0. In the dataset `read` is 3. So every event reached
+On my machine `read` is 0. In the dataset `read` is 3. So every event reached
 the model meaning something completely different.
 
 Nothing crashed, because both numbers were valid. The scores were just
@@ -198,14 +199,14 @@ two systems by name.
 
 ---
 
-## Why it learns your machine first
+## Why it learns machine first
 
 The model knows what normal looked like in 2011. Modern software behaves very
 differently, so at first almost everything looked like an attack.
 
 Raising the alert level by hand does not help when normal activity already
 scores 99 percent. So the tool spends its first 90 seconds watching quietly,
-learning what is normal **on your machine**, and then sets the alert level just
+learning what is normal **on my machine**, and then sets the alert level just
 above that.
 
 False alarms dropped from **87 percent to 3 percent**.
@@ -231,6 +232,7 @@ against detection, and detection stayed the same.
 
 ```
 Project/
+├── assets/
 ├── src/
 │   ├── ebpf_sensor.c        the program that runs inside the kernel
 │   ├── dashboard.py         web version with the live interface
@@ -250,16 +252,5 @@ Notebooks are explained in [ml/README.md](ml/README.md).
 
 ---
 
-## Notes on setup
-
-**Why `run.sh` sets `PYTHONPATH`.** Running with `sudo` changes your home
-folder to `/root`. Python then cannot find packages you installed for your own
-user, including PyTorch, and the model silently fails to load.
-
-**The sensor ignores itself.** Reading the kernel buffer needs system calls. If
-we watched those too, we would create an endless loop that fills the buffer, so
-the sensor skips its own process.
-
-**You need:** BCC (`python3-bpfcc`), Flask, PyTorch with CUDA, scikit-learn,
-joblib, and the
-[ADFA LD dataset](https://research.unsw.edu.au/projects/adfa-ids-datasets).
+**This things are needed:** BCC (`python3-bpfcc`), Flask, PyTorch with CUDA, scikit-learn,
+joblib, and the [ADFA LD dataset](https://research.unsw.edu.au/projects/adfa-ids-datasets).
